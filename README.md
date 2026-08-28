@@ -69,7 +69,7 @@ pacman -S ffmpeg alsa-lib pkgconf base-devel
 ## Uso
 
 ```
-git clone <repo>
+git clone https://github.com/angelodev25/Sor.git
 cd Sor
 make run
 ```
@@ -100,7 +100,7 @@ eq.set_mid_body(2.5);       // Cuerpo vocal a 300 Hz
 // Agudos
 eq.set_high_gain(2.5);
 eq.set_high_shelf(5.0);     // Shelf amplio a 2-6 kHz
-// (high_air eliminado — sustituido por shelf amplio)
+eq.set_high_air(6.0); // refuerza agudos +9000Hz
 
 eq.set_master_gain(0.75);
 ```
