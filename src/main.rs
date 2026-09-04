@@ -2,14 +2,13 @@ use std::path::Path;
 use std::error::Error as StdError;
 
 mod audio;
-mod eq;
-mod loader;
-mod types;
 
-use audio::AudioEngine;
-use types::AudioConfig; 
-use eq::ThreeBandEQ;
-use loader::load_audio_file;
+use crate::audio::{
+    engine::AudioEngine,
+    eq::ThreeBandEQ,
+    loader::load_audio_file,
+    types::AudioConfig,
+};
 
 fn main() -> Result<(), Box<dyn StdError>> {
     // Mis accesos rapidos.

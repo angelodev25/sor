@@ -16,3 +16,7 @@ target
 #
 *.m4a
 *.mp3
+
+# Added by cargo
+
+/target

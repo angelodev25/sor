@@ -1,5 +1,5 @@
 use biquad::{Biquad as _, Coefficients, DirectForm1, Hertz, Type};
-use crate::eq::Compressor;
+use crate::audio::eq::Compressor;
 
 const Q1: f32 = 0.5412;   // Linkwitz-Riley Q1
 const Q2: f32 = 1.3066;   // Linkwitz-Riley Q2

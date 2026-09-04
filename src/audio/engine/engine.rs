@@ -2,9 +2,9 @@ use audioadapter_buffers::direct::SequentialSliceOfVecs;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::{Async, Resampler, SincInterpolationParameters};
 
-use crate::types::AudioConfig;
-use crate::eq::ThreeBandEQ;
-use crate::audio::Limiter;
+use crate::audio::types::AudioConfig;
+use crate::audio::eq::ThreeBandEQ;
+use crate::audio::engine::Limiter;
 
 use std::cell::{Cell, RefCell};
 use std::error::Error as StdError;

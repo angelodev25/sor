@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 use std::path::Path;
 use std::error::Error as StdError;
 
-use crate::types::AudioData;
+use crate::audio::types::AudioData;
 
 pub fn load_audio_file(path: &Path) -> Result<AudioData, Box<dyn StdError>> {
     // Decodifica a PCM f32le raw, 44100 Hz, estéreo, vía stdout
