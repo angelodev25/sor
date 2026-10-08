@@ -1,40 +1,70 @@
-use biquad::{Biquad as _, Coefficients, DirectForm1, Hertz, Type};
+//! Ecualizador de 3 bandas estéreo, con crossover Linkwitz-Riley 4º orden,
+//! filtros de carácter y compresores estéreo-link por banda.
+
+use biquad::{Biquad as _, Coefficients, DirectForm2Transposed, Hertz, Type};
 use crate::audio::eq::Compressor;
 
 const Q1: f32 = 0.5412;   // Linkwitz-Riley Q1
 const Q2: f32 = 1.3066;   // Linkwitz-Riley Q2
 
+struct StereoBiquad {
+    l: DirectForm2Transposed<f32>,
+    r: DirectForm2Transposed<f32>,
+}
+
+impl StereoBiquad {
+    fn new(coeffs: Coefficients<f32>) -> Self {
+        Self {
+            l: DirectForm2Transposed::new(coeffs),
+            r: DirectForm2Transposed::new(coeffs),
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
+        (self.l.run(l), self.r.run(r))
+    }
+}
+
 // Estructura principal del motor
 pub struct ThreeBandEQ {
-    // HPF subsonic
-    hpf1: DirectForm1<f32>,
-    hpf2: DirectForm1<f32>,
-    // Crossovers LR4
-    // Low band: LP4 a low_freq
-    lp_low1: DirectForm1<f32>,
-    lp_low2: DirectForm1<f32>,
-    // Mid band: HP a low_freq + LP a high_freq
-    hp_mid1: DirectForm1<f32>,
-    hp_mid2: DirectForm1<f32>,
-    lp_mid1: DirectForm1<f32>,
-    lp_mid2: DirectForm1<f32>,
-    mid_body: DirectForm1<f32>,
-    // High band: HP4 a high_freq
-    hp_high1: DirectForm1<f32>,
-    hp_high2: DirectForm1<f32>,
-    
-    // Procesameinto por banda 
-    low_resonance: DirectForm1<f32>,
-    low_shelf: DirectForm1<f32>,
-    high_shelf: DirectForm1<f32>,
-    mid_presence: DirectForm1<f32>,
-    high_air: DirectForm1<f32>,
+     // --- HPF subsonic (LR4 a 20 Hz) ---
+    hpf1: StereoBiquad,
+    hpf2: StereoBiquad,
 
+    // --- Crossover LR4 (reparte la señal en graves / medios / agudos) ---
+    // Graves: LP4 @ low_freq
+    lp_low1: StereoBiquad,
+    lp_low2: StereoBiquad,
+    // Medios: HP4 @ low_freq  +  LP4 @ high_freq  (pasabanda)
+    hp_mid1: StereoBiquad,
+    hp_mid2: StereoBiquad,
+    lp_mid1: StereoBiquad,
+    lp_mid2: StereoBiquad,
+    // Agudos: HP4 @ high_freq
+    hp_high1: StereoBiquad,
+    hp_high2: StereoBiquad,
+
+    // --- Procesamiento por banda ---
+    /// Peaking @ 65 Hz para reforzar/cortar resonancia de graves.
+    low_resonance: StereoBiquad,
+    /// Shelf @ 180 Hz para reforzar/cortar cuerpo de graves.
+    low_shelf: StereoBiquad,
+    /// Peaking @ 300 Hz para "cuerpo" de medios.
+    mid_body: StereoBiquad,
+    /// Peaking @ 2200 Hz para "presencia".
+    mid_presence: StereoBiquad,
+    /// High shelf @ 2000 Hz.
+    high_shelf: StereoBiquad,
+    /// Peaking @ 9000 Hz para "aire".
+    high_air: StereoBiquad,
+
+    // --- Compresores por banda (estéreo-link) ---
     bass_compressor: Compressor,
-    highs_compressor: Compressor,
     mid_compressor: Compressor,
-    
-    // Gains por banda (lineales, no dB)
+    highs_compressor: Compressor,
+
+    // --- Ganancias (lineales) ---
     low_gain: f32,
     mid_gain: f32,
     high_gain: f32,
@@ -43,124 +73,126 @@ pub struct ThreeBandEQ {
     sample_rate: f32,
 }
 
-fn make_lp(fs: Hertz<f32>, freq: f32, q: f32) -> DirectForm1<f32> {
-    let c = Coefficients::<f32>::from_params(
+fn make_lp(fs: Hertz<f32>, freq: f32, q: f32) -> Coefficients<f32> {
+    Coefficients::<f32>::from_params(
         Type::LowPass, fs, Hertz::from_hz(freq).unwrap(), q,
-    ).unwrap();
-    DirectForm1::new(c)
+    ).unwrap()
 }
 
-fn make_hp(fs: Hertz<f32>, freq: f32, q: f32) -> DirectForm1<f32> {
-    let c = Coefficients::<f32>::from_params(
+fn make_hp(fs: Hertz<f32>, freq: f32, q: f32) -> Coefficients<f32> {
+    Coefficients::<f32>::from_params(
         Type::HighPass, fs, Hertz::from_hz(freq).unwrap(), q,
-    ).unwrap();
-    DirectForm1::new(c)
+    ).unwrap()
 }
 
-fn make_peaking(fs: Hertz<f32>, freq: f32, q: f32, gain: f32) -> DirectForm1<f32> {
-    let c = Coefficients::<f32>::from_params(
+fn make_peaking(fs: Hertz<f32>, freq: f32, q: f32, gain: f32) -> Coefficients<f32> {
+    Coefficients::<f32>::from_params(
         Type::PeakingEQ(gain), fs, Hertz::from_hz(freq).unwrap(), q,
-    ).unwrap();
-    DirectForm1::new(c)
+    ).unwrap()
 }
 
-fn make_low_shelf(fs: Hertz<f32>, freq: f32, q: f32, gain: f32) -> DirectForm1<f32> {
-    let c = Coefficients::<f32>::from_params(
+fn make_low_shelf(fs: Hertz<f32>, freq: f32, q: f32, gain: f32) -> Coefficients<f32> {
+    Coefficients::<f32>::from_params(
         Type::LowShelf(gain), fs, Hertz::from_hz(freq).unwrap(), q,
-    ).unwrap();
-    DirectForm1::new(c)
+    ).unwrap()
 }
 
-fn make_high_shelf(fs: Hertz<f32>, freq: f32, q: f32, gain: f32) -> DirectForm1<f32> {
-    let c = Coefficients::<f32>::from_params(
+fn make_high_shelf(fs: Hertz<f32>, freq: f32, q: f32, gain: f32) -> Coefficients<f32> {
+    Coefficients::<f32>::from_params(
         Type::HighShelf(gain), fs, Hertz::from_hz(freq).unwrap(), q,
-    ).unwrap();
-    DirectForm1::new(c)
+    ).unwrap()
 }
 
 impl ThreeBandEQ {
     pub fn new(sample_rate: f32, low_freq: f32, high_freq: f32) -> Self {
         let fs = Hertz::from_hz(sample_rate).unwrap();
-        // HPF subsonic a 20 Hz, LR4
-        let hpf1 = make_hp(fs, 20.0, Q1);
-        let hpf2 = make_hp(fs, 20.0, Q2);
-
-        
         Self {
-            hpf1, hpf2,
-            lp_low1: make_lp(fs, low_freq, Q1),
-            lp_low2: make_lp(fs, low_freq, Q2),
-            hp_mid1: make_hp(fs, low_freq, Q1),
-            hp_mid2: make_hp(fs, low_freq, Q2),
-            lp_mid1: make_lp(fs, high_freq, Q1),
-            lp_mid2: make_lp(fs, high_freq, Q2),
-            hp_high1: make_hp(fs, high_freq, Q1),
-            hp_high2: make_hp(fs, high_freq, Q2),
+            // Subsonic HPF
+            hpf1: StereoBiquad::new(make_hp(fs, 20.0, Q1)),
+            hpf2: StereoBiquad::new(make_hp(fs, 20.0, Q2)),
+
+            // Crossovers
+            lp_low1: StereoBiquad::new(make_lp(fs, low_freq, Q1)),
+            lp_low2: StereoBiquad::new(make_lp(fs, low_freq, Q2)),
+            hp_mid1: StereoBiquad::new(make_hp(fs, low_freq, Q1)),
+            hp_mid2: StereoBiquad::new(make_hp(fs, low_freq, Q2)),
+            lp_mid1: StereoBiquad::new(make_lp(fs, high_freq, Q1)),
+            lp_mid2: StereoBiquad::new(make_lp(fs, high_freq, Q2)),
+            hp_high1: StereoBiquad::new(make_hp(fs, high_freq, Q1)),
+            hp_high2: StereoBiquad::new(make_hp(fs, high_freq, Q2)),
+
+            // Carácter
+            low_resonance: StereoBiquad::new(make_peaking(fs, 65.0, 1.15, 0.0)),
+            low_shelf: StereoBiquad::new(make_low_shelf(fs, 180.0, 0.6, 0.0)),
+            mid_body: StereoBiquad::new(make_peaking(fs, 300.0, 1.2, 0.0)),
+            mid_presence: StereoBiquad::new(make_peaking(fs, 2200.0, 0.8, 0.0)),
+            high_shelf: StereoBiquad::new(make_high_shelf(fs, 4500.0, 1.0, 0.0)),
+            high_air: StereoBiquad::new(make_peaking(fs, 9000.0, 1.0, 0.0)),
+
+            // Compresores 
+            bass_compressor:  Compressor::new(sample_rate, 0.0, 2.0, 10.0, 100.0),
+            mid_compressor:   Compressor::new(sample_rate, -6.0, 2.0, 5.0, 80.0),
+            highs_compressor: Compressor::new(sample_rate, 3.0, 2.0, 3.0, 60.0),
+
             low_gain: 1.0,
             mid_gain: 1.0,
             high_gain: 1.0,
-            master_gain: 0.85,
+            master_gain: 1.0,
+
             sample_rate,
-            low_resonance: make_peaking(fs, 65.0, 1.15, 0.0),
-            low_shelf: make_low_shelf(fs, 180.0, 0.6, 0.0),
-            mid_presence: make_peaking(fs, 2200.0, 0.8, 0.0),
-            mid_body: make_peaking(fs, 300.0, 1.2, 0.0),
-            high_air: make_peaking(fs, 8000.0, 1.0, 0.0),
-            high_shelf: make_high_shelf(fs, 2000.0, 1.0, 0.0),
-            bass_compressor: Compressor::new_for_bass(),
-            mid_compressor: Compressor::new_for_vocals(),
-            highs_compressor: Compressor::new_for_highs(),
         }
     }
     
     #[inline]
-    pub fn process(&mut self, sample: f32) -> f32 {
+    pub fn process(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
         // 1) HPF subsonic
-        let s = self.hpf1.run(sample);
-        let s = self.hpf2.run(s);
-
-        // Este filtro se llama dos veces para la misma muestra, la primera antes de cualquier crossover y la segunda despues del crossover de bajo.
-        // Esto comenzo como un bug de edicion pero se notó que el filtro de resonancia de bajos tiene un efecto más pronunciado 
-        // si se aplica antes del crossover, y el resultado es (mucho) más agradable al oído.
-        let s = self.low_resonance.run(s);
+        let (l, r) = self.hpf1.process(in_l, in_r);
+        let (l, r) = self.hpf2.process(l, r);
         
         // 2) Split en 3 bandas con crossovers LR4
-        let mut low = self.lp_low1.run(s);
-        low = self.lp_low2.run(low);
+        // Low: LP4 a low_freq
+        let (low_l, low_r) = self.lp_low1.process(l, r);
+        let (low_l, low_r) = self.lp_low2.process(low_l, low_r);
         
         // Mid: HP4 a low_freq + LP4 a high_freq
-        let mut mid = self.hp_mid1.run(s);
-        mid = self.hp_mid2.run(mid);
-        mid = self.lp_mid1.run(mid);
-        mid = self.lp_mid2.run(mid);
+        let (mid_l, mid_r) = self.hp_mid1.process(l, r);
+        let (mid_l, mid_r) = self.hp_mid2.process(mid_l, mid_r);
+        let (mid_l, mid_r) = self.lp_mid1.process(mid_l, mid_r);
+        let (mid_l, mid_r) = self.lp_mid2.process(mid_l, mid_r);
+
         
         // High: HP4 a high_freq
-        let mut high = self.hp_high1.run(s);
-        high = self.hp_high2.run(high);
+        let (high_l, high_r) = self.hp_high1.process(l, r);
+        let (high_l, high_r) = self.hp_high2.process(high_l, high_r);
         
         // Procesameinto por banda
 
-        // Bajos
-        let low = self.bass_compressor.process(low);
-        let low = self.low_resonance.run(low);
-        let low = self.low_shelf.run(low);
-        let low = low * self.low_gain;
+        // Graves: compressor, resonance, shelf, gain
+        self.bass_compressor.set_makeup(1.06); // leve refuerzo de graves
+        let (low_l, low_r) = self.bass_compressor.process_stereo(low_l, low_r);
+        let (low_l, low_r) = self.low_resonance.process(low_l, low_r);
+        let (low_l, low_r) = self.low_shelf.process(low_l, low_r);
+        let low_l = low_l * self.low_gain;
+        let low_r = low_r * self.low_gain;
 
-        // Medios
-        let mid = self.mid_body.run(mid);
-        let mid = self.mid_presence.run(mid);
-        let mid = self.mid_compressor.process(mid);
-        let mid = mid * self.mid_gain;
+        // Medios: body → presence → compresor → gain
+        let (mid_l, mid_r) = self.mid_body.process(mid_l, mid_r);
+        let (mid_l, mid_r) = self.mid_presence.process(mid_l, mid_r);
+        let (mid_l, mid_r) = self.mid_compressor.process_stereo(mid_l, mid_r);
+        let mid_l = mid_l * self.mid_gain;
+        let mid_r = mid_r * self.mid_gain;
 
-        // Agudos
-        let high = self.highs_compressor.process(high);
-        let high = self.high_shelf.run(high);
-        let high = self.high_air.run(high);
-        let high = high * self.high_gain;
+        // Agudos: compresor → shelf → air → gain
+        let (high_l, high_r) = self.highs_compressor.process_stereo(high_l, high_r);
+        let (high_l, high_r) = self.high_shelf.process(high_l, high_r);
+        let (high_l, high_r) = self.high_air.process(high_l, high_r);
+        let high_l = high_l * self.high_gain;
+        let high_r = high_r * self.high_gain;
 
         // Mezcla de las tres bandas
-        let mix = low + mid + high;
-        mix * self.master_gain
+        let out_l = (low_l + mid_l + high_l) * self.master_gain;
+        let out_r = (low_r + mid_r + high_r) * self.master_gain;
+        (out_l, out_r)
     }
     
     // Setters por banda
@@ -170,11 +202,11 @@ impl ThreeBandEQ {
     }
     pub fn set_low_resonance(&mut self, gain: f32) {
         let fs = Hertz::from_hz(self.sample_rate).unwrap();
-        self.low_resonance = make_peaking(fs, 65.0, 1.15, gain);
+        self.low_resonance = StereoBiquad::new(make_peaking(fs, 65.0, 1.15, gain));
     }
     pub fn set_low_shelf(&mut self, gain: f32) {
         let fs = Hertz::from_hz(self.sample_rate).unwrap();
-        self.low_shelf = make_low_shelf(fs, 180.0, 0.6, gain);
+        self.low_shelf = StereoBiquad::new(make_low_shelf(fs, 180.0, 0.6, gain));
     }
 
     pub fn set_mid_gain(&mut self, gain: f32) {
@@ -182,11 +214,11 @@ impl ThreeBandEQ {
     }
     pub fn set_mid_presence(&mut self, gain: f32) {
         let fs = Hertz::from_hz(self.sample_rate).unwrap();
-        self.mid_presence = make_peaking(fs, 2200.0, 0.8, gain);
+        self.mid_presence = StereoBiquad::new(make_peaking(fs, 2200.0, 0.8, gain));
     }
     pub fn set_mid_body(&mut self, gain: f32) {
         let fs = Hertz::from_hz(self.sample_rate).unwrap();
-        self.mid_body = make_peaking(fs, 300.0, 0.7, gain);
+        self.mid_body = StereoBiquad::new(make_peaking(fs, 300.0, 1.2, gain));
     }
 
     pub fn set_high_gain(&mut self, gain: f32) {
@@ -194,14 +226,11 @@ impl ThreeBandEQ {
     }
     pub fn set_high_shelf(&mut self, gain: f32) {
         let fs = Hertz::from_hz(self.sample_rate).unwrap();
-        // Nota: este shelf se establecio a 2000Hz mientras hacia pruebas empiricas para encontrar mejor calidad de sonido. Se descubrio que al establecerlo en 2000hz con 
-        // este Q especifico ayuda a reforzar frecuencia arriba de 2000 (2500 - 4000) las cuales cortaba el hp_high con corte en 4000 el cual atenuaba esas frecuencias.
-        // Importante dejarlo asi para sonido con mejor definicion
-        self.high_shelf = make_high_shelf(fs, 2000.0, 1.0, gain);
+        self.high_shelf = StereoBiquad::new(make_high_shelf(fs, 5000.0, 1.0, gain));
     }
     pub fn set_high_air(&mut self, gain: f32) {
         let fs = Hertz::from_hz(self.sample_rate).unwrap();
-        self.high_air = make_peaking(fs, 9000.0, 1.0, gain);
+        self.high_air = StereoBiquad::new(make_peaking(fs, 9000.0, 1.0, gain));
     }
 
     pub fn set_master_gain(&mut self, gain: f32) {
