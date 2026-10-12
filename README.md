@@ -1,128 +1,152 @@
-# Sor - música con calidad.
+# Sor — música con calidad
 
-Reproductor de música con motor de sonido construido en Rust buscando alcanzar (y si es posible superar) la calidad de sonido de Mixxx.
+Reproductor de música en Rust. Nace de la calidad de salida de Mixxx con buena
+ecualización: el objetivo es esa pegada y claridad, pero en una app sencilla
+para escuchar música, sin la complejidad de una cabina DJ.
 
-Este reproductor nace de experimentar la calidad de audio de salida que puede ofrecer Mixxx con una buena ecualización. El objetivo es construir una app
-para reproducir tu música cómodamente, en una interfaz sencilla sin las tantas cosas que ofrece Mixxx (que es para DJs), pero que mantenga su calidad de audio.
+## Estado actual (v0.2: motor + UI funcional)
 
-## Objetivos del proyecto
+- Motor DSP propio: HPF + crossover LR4 de 3 bandas + EQ + compresores por
+  banda + soft clipper tanh + limitador lookahead + volumen. Todo en el
+  callback de `cpal`, sin alocar, con parámetros atómicos desde la UI.
+- Decodificación universal vía `ffmpeg` en subprocess (MP3, AAC/M4A incluyendo
+  HE-AACv2, FLAC, Opus, WAV, ALAC…).
+- UI en Slint: reproductor + panel de EQ con 9 perillas, drive, volumen,
+  clip y techo del limitador, con toggles.
+- Limitación actual: la pista sigue hardcodeada en `src/main.rs:138`.
+  El botón play/pause de la UI funciona, pero aún no hay selector de
+  archivos. Es la próxima feature.
 
-1. Crear la primera version del motor de audio con un sonido decente. [listo]
-2. Crear una interfaz sencilla para cargar las canciones, reproducir y pausar.
-3. Hacer la interfaz bonita luego de que sea funcional (obviamente).
-4. Desarrollar mejoras en el motor de sonido para mejorar la calidad de salida a medida pasa el tiempo.
-5. Implementar features de un reproductor de verdad, moderno y de calidad.
----
+## Arquitectura
 
-## Estado actual
+```text
+ffmpeg subprocess --f32le--> ringbuffer (rtrb, 3 s) --> callback cpal
+  --> [EQ 3 bandas] --> [soft clipper] --> [limiter] --> [volumen] --> DAC
 
-## v0.1 del motor de audio
+UI Slint --Atomics--> mismo callback (sin locks)
+```
 
-#### Decodificación
+### Archivos
 
-- Carga y decodificación de cualquier formato soportado por FFmpeg (MP3, AAC/M4A, FLAC, Opus, WAV, ALAC, …) vía subprocess a PCM f32 little-endian a 44100 Hz estéreo.
-- Requiere ffmpeg instalado en el sistema (sudo apt install ffmpeg).
-- Esta capa resolvió problemas críticos de decodificación HE-AAC/HE-AACv2 que librerías puras de Rust no cubren (SBR/PS no implementado correctamente en Symphonia).
+| Archivo | Rol |
+|---|---|
+| `src/main.rs` | Crea UI + estado compartido + presets iniciales, callback `play-pause` |
+| `src/audio/engine/engine.rs` | `AudioEngine`: abre dispositivo `cpal` (exige `f32` y estéreo), buffer ~25 ms redondeado a potencia de dos (mín. 512), construye el stream y la cadena DSP |
+| `src/audio/loader/streamer.rs` | `spawn_streamer`: lanza `ffmpeg -f f32le -acodec pcm_f32le -ar <fs> -ac <ch> pipe:1`, hilo lector a ringbuffer `rtrb`. `Drop` mata el proceso y une el hilo |
+| `src/audio/eq/three_band.rs` | `ThreeBandEQ`: HPF + crossover LR4 + EQ + compresores por banda |
+| `src/audio/eq/compressor.rs` | `Compressor` estéreo-link (detector = máx. \|L\|,\|R\|), envolvente attack/release exponencial |
+| `src/audio/eq/soft_clip.rs` | `SoftClipper` tanh, lineal bajo el umbral, asíntota a `ceiling = 0.98` |
+| `src/audio/engine/limiter.rs` | `Limiter` brickwall con lookahead (línea de retardo + envolvente asimétrica, ganancia común a L/R) |
+| `src/audio/controls.rs` | `Controls` (paused/song_loaded/song_ended/quit) + `EqParams` + `LimiterParams` + `OutputParams`, todo atómico |
+| `src/ui/app_window.slint` | `AppWindow`: layout `Navbar + (Player | EqPanel)`, propiedades y callbacks |
+| `src/ui/player.slint`, `eq_panel.slint`, `knob.slint`, `navbar.slint` | Player, panel de EQ (knobs + sliders + toggles), knob reutilizable, nav |
+| `build.rs` | Compila `app_window.slint` con `slint-build` + librería de iconos `lucide` |
 
-#### Procesamiento de muestras
+## Cadena DSP (valores reales del código)
 
-El pipeline de audio por canal se aplica en serie para cada muestra:
+Orden por muestra estéreo, en `engine.rs` → `three_band.rs`:
 
-1. HPF subsonic LR4 a 30 Hz — elimina DC offset y rumble sub-audible que ensucia los graves.
-2. Crossover LR4 de 3 bandas (cortes a 125 Hz y 4000 Hz) — divide el espectro en LOW / MID / HIGH con aislamiento de 24 dB/octava. Fase coherente. Suma plana cuando todas las perillas están a 0 dB.
+1. **HPF subsónico LR4 a 20 Hz** (`three_band.rs:111-112`). Limpia DC y rumble.
+2. **Crossover LR4 en 180 Hz y 3500 Hz** (`main.rs:150`, `three_band.rs:115-122`).
+   LOW = LP4, MID = HP4+LP4, HIGH = HP4. 24 dB/oct, fase coherente.
+3. **Procesado por banda** (`three_band.rs:170-194`):
+   - LOW: compresor (umbral 0 dB, 2:1, 10/100 ms, makeup 1.06) → peaking
+     resonancia 65 Hz Q 1.15 → low-shelf Baxandall 180 Hz Q 0.6 → ganancia.
+   - MID: peaking cuerpo 300 Hz Q 1.2 → peaking presencia 2200 Hz Q 0.8 →
+     compresor (umbral −6 dB, 2:1, 5/80 ms) → ganancia.
+   - HIGH: compresor (umbral +3 dB, 2:1, 3/60 ms) → high-shelf 5 kHz Q 1.0 →
+     peaking aire 9000 Hz Q 1.0 → ganancia.
+4. **Mezcla + `master_gain`** (lineal, perilla "Drive" 0–1.5).
+5. **Soft clipper tanh** (`soft_clip.rs`): bajo el umbral pasa intacto; por
+   encima comprime hacia `ceiling = 0.98`. Umbral configurable en dB desde la
+   UI (perilla "Clip", por defecto −1.2 dB en `main.rs:33`).
+6. **Limitador lookahead** (`limiter.rs`, `engine.rs:90-96`): 7 ms lookahead,
+   2 ms attack, 80 ms release. Techo configurable en dB desde la UI
+   (perilla "Techo", por defecto 1.5 dB en `main.rs:64`).
+7. **Volumen final** (lineal 0–1, por defecto 0.75).
 
-3. Procesamiento por banda aislada:
+Los biquads solo se reconstruyen cuando su valor cambia (comparación contra
+caché en el callback, `engine.rs:149-165`). Los toggles de EQ / soft-clip /
+limiter hacen bypass de cada etapa.
 
-- LOW: PeakEQ "resonancia" a 65 Hz + LowShelf Baxandall a 180 Hz + compresor de graves dedicado.
-- MID: PeakEQ "body" a 300 Hz + PeakEQ "presence" a 2200 Hz + compresor suave de voces.
-- HIGH: HighShelf amplio a 2000 Hz (Q=1.0) + compresor de transientes de agudos.
-4. Mezcla final con master_gain configurable.
-5. Limitador brickwall de seguridad al final del pipeline.
+## UI (Slint)
 
-### Componentes principales
+- `Player`: título, play/pause, estado `is-loading` / `is-playing`.
+- `EqPanel`: 9 knobs (graves: ganancia/shelf/resonancia; medios:
+  ganancia/cuerpo/presencia; agudos: ganancia/shelf/aire) + `Drive`
+  (master_gain) + slider de volumen + perillas `Clip` (−15…+2 dB) y `Techo`
+  (−6…+3 dB) con sus toggles ON/OFF.
+- Callbacks hacia Rust: `play-pause`, `eq-changed`, `limiter-changed`,
+  `output-changed` (`app_window.slint:41-44`, `main.rs:71-111`).
 
-Componente | Rol
-------------|-----
-audio_file.rs | Decodificación universal vía FFmpeg subprocess
-engine.rs | Configuración de cpal + stream de salida
-three_band.rs | EQ DJ con crossover LR4 + procesamiento por banda
-compressor.rs | Compresor dinámico configurable por banda
-limiter.rs | Limitador brickwall de seguridad
+## Preset inicial
 
-## Requisitos del sistema
+En `main.rs:39-48`. Es el ajuste que mejor suena en el equipo del autor
+(modesto — en otro equipo puede pedir valores distintos):
 
-- Rust toolchain (stable).
-- ffmpeg instalado y accesible en PATH.
-- Sistema de audio compatible con cpal (ALSA en Linux).
+```rust
+low_gain 1.9, low_resonance 6.0, low_shelf 4.0,
+mid_gain 1.0, mid_presence 2.0, mid_body 1.0,
+high_gain 2.8, high_shelf 4.0, high_air 6.0,
+master_gain 0.72, volumen 0.75, clip -1.2 dB, techo +1.5 dB
+```
+
+## Requisitos
+
+- Toolchain Rust estable.
+- `ffmpeg` en el `PATH`.
+- Audio compatible con `cpal` (ALSA en Linux).
+- Dependencias Rust (`Cargo.toml`): `cpal`, `biquad`, `rtrb`, `slint`,
+  `image` (png/jpeg), `id3`, `lofty`, `lucide-slint`.
+  `id3` / `lofty` / `image` ya están declaradas para metadatos y carátulas,
+  aún sin cablear en la UI.
 
 ### Debian/Ubuntu
-```
+
+```sh
 sudo apt install ffmpeg libasound2-dev pkg-config make
 ```
 
 ### Arch
+
+```sh
+sudo pacman -S ffmpeg alsa-lib pkgconf base-devel
 ```
-pacman -S ffmpeg alsa-lib pkgconf base-devel
-```
-*'base devel' es para instalar la herramienta que permite ejecutar Makefile*
 
 ## Uso
 
-```
+```sh
 git clone https://github.com/angelodev25/Sor.git
 cd Sor
-make run
-```
-(Solo ejecuta el motor de audio).
-
-Por defecto reproduce un archivo hardcoded en main.rs. Para cambiar la pista, edita main.rs:
-```
-let path = Path::new("tu_archivo.m4a");
+cargo run
 ```
 
-## Configuracion del EQ
+> Nota: el `Makefile` (`make run` con `SLINT_BACKEND=winit-software`) está
+> roto — ese backend da panic. Usa `cargo run` directamente.
 
-Todas las perillas se ajustan en main.rs antes de llamar a engine.play(...):
+Limitación actual: la pista está hardcodeada (`src/main.rs:138`):
 
-```
-let mut eq = ThreeBandEQ::new(sample_rate_f32, 125.0, 4000.0);
-
-// Graves
-eq.set_low_gain(2.5);       // Perilla DJ: +2.5 dB
-eq.set_low_resonance(5.0);  // +5 dB a 65 Hz
-eq.set_low_shelf(3.8);      // +3.8 dB Baxandall a 180 Hz
-
-// Medios
-eq.set_mid_gain(0.0);
-eq.set_mid_presence(3.0);   // Presencia vocal
-eq.set_mid_body(2.5);       // Cuerpo vocal a 300 Hz
-
-// Agudos
-eq.set_high_gain(2.5);
-eq.set_high_shelf(5.0);     // Shelf amplio a 2-6 kHz
-eq.set_high_air(6.0); // refuerza agudos +9000Hz
-
-eq.set_master_gain(0.75);
+```rust
+let path = Path::new("BAD OMENS  Like A Villain (Official Music Video).m4a");
 ```
 
-## Tecnologías usadas
+Para probar otra pista, edita esa línea con la ruta a tu archivo.
 
-### Motor de audio (Rust):
+## Roadmap realista (corto plazo)
 
-```
-[dependencies]
-cpal = "0.15"
-rubato = "0.15"
-biquad = "0.6"
-audioadapter = "0.5"
-audioadapter-buffers = "0.5"
-```
+1. Selector de archivos en la UI (eliminar el path hardcodeado).
+2. Mostrar título / artista / carátula desde tags (`id3`/`lofty` + `image`
+   ya en `Cargo.toml`).
+3. Presets de EQ guardables (el actual + flat + alguno más).
+4. Barra de progreso + seek (hoy solo play/pausa; el hilo espera a
+   `song_ended` o `quit`).
+5. Pulir `Navbar` (hoy sin efecto) o quitarla si no aporta.
 
-### Próximos pasos:
+## Objetivos del proyecto (visión)
 
-- Interfaz gráfica para cargar archivos
-- Control de volumen maestro en tiempo real
-- Perillas del EQ expuestas en la UI (low/mid/high)
-- Soporte para playlists
-- Soporte para metadatos (tags ID3, AAC)
-- Normalización de loudness (LUFS) para que todas las pistas suenen al mismo volumen
+1. Motor de audio con sonido decente. [listo]
+2. Interfaz sencilla para cargar canciones, reproducir y pausar. [a medias:
+   UI lista, falta selector de archivos]
+3. Hacer la interfaz bonita cuando sea funcional. [en curso]
+4. Mejoras iterativas del motor (calidad de salida con el tiempo).
+5. Features de reproductor moderno (las del roadmap corto primero).
