@@ -1,0 +1,223 @@
+import { Slider, ProgressIndicator } from "std-widgets.slint";
+import { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, MusicIcon } from "@lucide";
+
+// Boton circular con icono. El icono se pasa como hijo a traves de
+// @children, porque en Slint los iconos de Lucide son componentes
+// (no valores <image>), y no se pueden pasar como propiedad.
+
+component IconButton inherits Rectangle {
+    callback clicked();
+
+    width: 58px;
+    height: 58px;
+    border-radius: 29px;
+    background: #1c2230;
+
+    VerticalLayout {
+        alignment: center;
+
+        HorizontalLayout {
+            alignment: center;
+            @children
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+
+export component Player inherits Rectangle {
+    in-out property <string> track-title: "Sin pista cargada";
+    in-out property <string> track-artist: "Artista desconocido";
+    in-out property <bool> is-playing: false;
+    in-out property <bool> is-loading: false;
+    in-out property <float> progress: 0;
+
+    callback play-pause();
+
+    background: #10151b;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 18px;
+        padding: 32px;
+
+        // --- Caratula centrada horizontalmente ---
+        HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 260px;
+                height: 260px;
+                border-radius: 20px;
+                background: @linear-gradient(135deg, #1a2029, #2d3748);
+                border-width: 1px;
+                border-color: #ffffff12;
+
+                // Centra el icono en ambos ejes.
+                VerticalLayout {
+                    alignment: center;
+
+                    HorizontalLayout {
+                        alignment: center;
+
+                        MusicIcon {
+                            size: 90px;
+                            colorize: #ffffff50;
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Titulo + artista ---
+        VerticalLayout {
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.track-title;
+                color: #f5f5fa;
+                font-size: 20px;
+                font-weight: 700;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: root.track-artist;
+                color: #8f8f9c;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+        }
+
+        // --- Barra de progreso ---
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            // Slint no tiene operador `%` para aritmetica: `%` esta
+            // reservado para unidades. El modulo se hace con Math.mod.
+            Text {
+                text: "\{Math.floor(root.progress * 225 / 60)}:\{Math.mod(Math.floor(root.progress * 225), 60)}";
+                color: #8f8f9c;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+
+            // `<=>` es binding bidireccional: el slider actualiza
+            // `progress` al arrastrarlo, y `progress` mueve el slider
+            // cuando se cambia desde fuera.
+            Slider {
+                min-width: 300px;
+                horizontal-stretch: 1;
+                minimum: 0;
+                maximum: 1;
+                value <=> root.progress;
+            }
+
+            Text {
+                text: "03:45";
+                color: #8f8f9c;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+
+        
+        // --- Controles ---
+        HorizontalLayout {
+            spacing: 16px;
+            alignment: center;
+            height: 58px;
+
+            // Anterior
+            Rectangle {
+                width: 44px;
+                height: 58px;
+                background: transparent;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    IconButton {
+                        width: 44px;
+                        height: 44px;
+                        clicked => { }
+
+                        SkipBackIcon {
+                            size: 18px;
+                            colorize: #e8e8ee;
+                        }
+                    }
+                }
+            }
+
+            // Reproducir / pausa: botón principal
+            Rectangle {
+                width: 58px;
+                height: 58px;
+                border-radius: 29px;
+                background: root.is-loading ? #1c2230 :
+                    root.is-playing ? #00e5ff : #1c2230;
+
+                animate background { duration: 150ms; }
+
+                VerticalLayout {
+                    alignment: center;
+
+                    HorizontalLayout {
+                        alignment: center;
+
+                        if root.is-loading : ProgressIndicator {
+                            width: 24px;
+                            height: 24px;
+                        }
+
+                        if !root.is-loading && root.is-playing : PauseIcon {
+                            size: 22px;
+                            colorize: #10151b;
+                        }
+
+                        if !root.is-loading && !root.is-playing : PlayIcon {
+                            size: 22px;
+                            colorize: #f5f5fa;
+                        }
+                    }
+                }
+
+                TouchArea {
+                    clicked => {
+                        if !root.is-loading {
+                            root.play-pause();
+                        }
+                    }
+                }
+            }
+
+            // Siguientes
+            Rectangle {
+                width: 44px;
+                height: 58px;
+                background: transparent;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    IconButton {
+                        width: 44px;
+                        height: 44px;
+                        clicked => { }
+
+                        SkipForwardIcon {
+                            size: 18px;
+                            colorize: #e8e8ee;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

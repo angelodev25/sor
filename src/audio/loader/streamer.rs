@@ -7,11 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use rtrb::{
-    Producer,
-    Consumer,
-    RingBuffer,
-};
+use rtrb::{Producer, Consumer, RingBuffer};
+use crate::audio::controls::Controls;
 
 const RING_FRAMES: usize = 44_100 * 3;
 const READ_CHUNK_BYTES: usize = 9216;
@@ -22,8 +19,13 @@ pub struct Streamer {
     handle:  Option<JoinHandle<()>>,
 }
 
-pub fn spawn_streamer(path: &Path, sample_rate: u32, channels: u16) -> Result<(Consumer<f32>, Streamer), Box<dyn StdError>> {
-    // conertir a PatBuff porque se movera al hilo
+pub fn spawn_streamer(
+    path: &Path, 
+    sample_rate: u32, 
+    channels: u16,
+    controls: Arc<Controls>,
+) -> Result<(Consumer<f32>, Streamer), Box<dyn StdError>> {
+    // convertir a PatBuff porque se movera al hilo
     let path: PathBuf = path.to_path_buf();
 
     let capacity = RING_FRAMES * channels as usize;
@@ -55,7 +57,11 @@ pub fn spawn_streamer(path: &Path, sample_rate: u32, channels: u16) -> Result<(C
     let stop_thread = stop.clone();
 
     // Hilo lector que lee de ffmpeg y empuja al buffer
-    let handle = thread::spawn(move || reader_loop(stdout, producer, stop_thread));
+    let handle = thread::spawn(move || {
+        reader_loop(stdout, producer, stop_thread);
+        controls.song_loaded.store(false, Ordering::Relaxed);
+        controls.song_ended.store(true, Ordering::Relaxed);
+    });
 
     Ok((consumer,
         Streamer{

@@ -1,0 +1,307 @@
+import { Knob } from "knob.slint";
+
+component EqGroup inherits Rectangle {
+    in property <string> title;
+    background: transparent;
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 2px;
+
+        Text {
+            text: root.title;
+            color: #8f8f9c;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            horizontal-alignment: left;
+            height: 12px;
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            spacing: 4px;
+            @children
+        }
+    }
+}
+
+component NeonSlider inherits Rectangle {
+    in-out property <float> value: 0;
+    in property <float> min: 0;
+    in property <float> max: 1;
+    in property <color> accent: #00e5ff;
+    in property <color> track-color: #ffffff1a;
+    in property <length> track-height: 5px;
+    in property <length> handle-size: 14px;
+
+    callback changed(float);
+
+    height: 22px;
+    background: transparent;
+
+    private property <float> norm: (value - min) / (max - min);
+    private property <length> track-x0: handle-size / 2;
+    private property <length> track-x1: self.width - handle-size / 2;
+    private property <length> handle-x: track-x0 + norm * (track-x1 - track-x0);
+
+    Rectangle {
+        width: 100%;
+        height: root.track-height;
+        y: (parent.height - root.track-height) / 2;
+        border-radius: root.track-height / 2;
+        background: root.track-color;
+    }
+
+    Rectangle {
+        x: root.track-x0;
+        width: Math.max(0px, root.handle-x - root.track-x0);
+        height: root.track-height;
+        y: (parent.height - root.track-height) / 2;
+        border-radius: root.track-height / 2;
+        background: root.accent;
+    }
+
+    Rectangle {
+        width: root.handle-size;
+        height: root.handle-size;
+        x: root.handle-x - root.handle-size / 2;
+        y: (parent.height - root.handle-size) / 2;
+        border-radius: root.handle-size / 2;
+        background: #1c2230;
+        border-width: 2px;
+        border-color: root.accent;
+    }
+
+    TouchArea {
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down
+                || (event.kind == PointerEventKind.move && self.pressed)) {
+                let mx = self.mouse-x / 1px;
+                let x0 = root.track-x0 / 1px;
+                let x1 = root.track-x1 / 1px;
+                let n = Math.max(0.0, Math.min(1.0, (mx - x0) / (x1 - x0)));
+                root.value = root.min + n * (root.max - root.min);
+                root.changed(root.value);
+            }
+        }
+    }
+}
+
+component ToggleButton inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <string> text: "";
+    in property <color> accent: #00e5ff;
+
+    callback toggled();
+
+    width: 44px;
+    height: 16px;
+    border-radius: 4px;
+    background: checked ? accent : #1c2230;
+    border-width: 1px;
+    border-color: checked ? accent : #ffffff20;
+
+    animate background { duration: 120ms; }
+    animate border-color { duration: 120ms; }
+
+    Text {
+        text: root.text;
+        color: root.checked ? #10151b : #e8e8ee;
+        font-size: 8px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+// Panel principal
+export component EqPanel inherits Rectangle {
+    // --- EQ ---
+    in-out property <float> low-gain: 0;
+    in-out property <float> low-shelf: 0;
+    in-out property <float> low-resonance: 0;
+    in-out property <float> mid-gain: 0;
+    in-out property <float> mid-body: 0;
+    in-out property <float> mid-presence: 0;
+    in-out property <float> high-gain: 0;
+    in-out property <float> high-shelf: 0;
+    in-out property <float> high-air: 0;
+
+    // --- Niveles ---
+    in-out property <float> drive: 1.0;
+    in-out property <float> volume: 1.0;
+    /// Threshold del soft clipper en dBFS. -12 = mucho clip, 0 = nada.
+    in-out property <float> soft-clipping: -3.0;
+    in-out property <bool> soft-clip-enabled: true;
+    in-out property <float> limiter-ceiling: -0.3;
+    in-out property <bool> limiter-enabled: true;
+
+    callback eq-changed();
+    callback output-changed();
+    callback limiter-changed();
+
+    background: #10151b;
+
+    VerticalLayout {
+        padding: 6px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: "Ecualizador";
+            color: #f5f5fa;
+            font-size: 13px;
+            font-weight: 700;
+            height: 16px;
+        }
+
+        // --- Volumen (slider) ---
+        VerticalLayout {
+            spacing: 2px;
+            vertical-stretch: 0;
+
+            HorizontalLayout {
+                Text {
+                    text: "Volumen";
+                    color: #8f8f9c;
+                    font-size: 9px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "\{Math.round(root.volume * 100)}%";
+                    color: #00e5ff;
+                    font-size: 9px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            NeonSlider {
+                value <=> root.volume;
+                min: 0;
+                max: 1;
+                changed(v) => { root.output-changed(); }
+            }
+        }
+
+        // --- Grupos EQ ---
+        EqGroup {
+            title: "GRAVES";
+            Knob { label: "Ganancia";   value <=> root.low-gain;      changed(v) => { root.eq-changed(); } }
+            Knob { label: "Shelf";      value <=> root.low-shelf;     changed(v) => { root.eq-changed(); } }
+            Knob { label: "Resonancia"; value <=> root.low-resonance; changed(v) => { root.eq-changed(); } }
+        }
+
+        EqGroup {
+            title: "MEDIOS";
+            Knob { label: "Ganancia";  value <=> root.mid-gain;     changed(v) => { root.eq-changed(); } }
+            Knob { label: "Cuerpo";    value <=> root.mid-body;     changed(v) => { root.eq-changed(); } }
+            Knob { label: "Presencia"; value <=> root.mid-presence; changed(v) => { root.eq-changed(); } }
+        }
+
+        EqGroup {
+            title: "AGUDOS";
+            Knob { label: "Ganancia"; value <=> root.high-gain;  changed(v) => { root.eq-changed(); } }
+            Knob { label: "Shelf";    value <=> root.high-shelf; changed(v) => { root.eq-changed(); } }
+            Knob { label: "Aire";     value <=> root.high-air;   changed(v) => { root.eq-changed(); } }
+        }
+
+        // Espaciador flexible.
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
+
+        // NIVELES
+        Rectangle {
+            background: transparent;
+            vertical-stretch: 0;
+
+            VerticalLayout {
+                alignment: start;
+                spacing: 4px;
+
+                Text {
+                    text: "NIVELES";
+                    color: #8f8f9c;
+                    font-size: 9px;
+                    font-weight: 700;
+                    letter-spacing: 2px;
+                    horizontal-alignment: left;
+                    height: 12px;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+
+                    // --- Columna 1: Drive ---
+                    Knob {
+                        label: "Drive";
+                        min: 0;
+                        max: 1.5;
+                        unit: "";
+                        value <=> root.drive;
+                        arc-from-start: true;
+                        changed(v) => { root.eq-changed(); }
+                    }
+
+                    // --- Columna 2: Clip ---
+                    VerticalLayout {
+                        spacing: 2px;
+                        alignment: center;
+
+                        Knob {
+                            label: "Clip";
+                            min: -15;
+                            max: 2;
+                            unit: "dB";
+                            value <=> root.soft-clipping;
+                            arc-from-start: true;
+                            changed(v) => { root.output-changed(); }
+                        }
+
+                        ToggleButton {
+                            checked <=> root.soft-clip-enabled;
+                            text: root.soft-clip-enabled ? "ON" : "OFF";
+                            toggled => { root.output-changed(); }
+                        }
+                    }
+
+                    // --- Columna 3: Techo ---
+                    VerticalLayout {
+                        spacing: 2px;
+                        alignment: center;
+
+                        Knob {
+                            label: "Techo";
+                            min: -6;
+                            max: 3;
+                            unit: "dB";
+                            value <=> root.limiter-ceiling;
+                            arc-from-start: true;
+                            changed(v) => { root.limiter-changed(); }
+                        }
+
+                        ToggleButton {
+                            checked <=> root.limiter-enabled;
+                            text: root.limiter-enabled ? "ON" : "OFF";
+                            toggled => { root.limiter-changed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,194 @@
+// Perilla rotativa con arco neon.
+//
+// El arco neon arranca desde:
+//   - el punto medio del recorrido si arc-from-start == false
+//   - el inicio del recorrido si arc-from-start == true
+//
+// Notas de Slint:
+//   - Math.cos/sin esperan un `angle`. Se construye con `float_deg * 1deg`.
+//   - Path.MoveTo / ArcTo usan `float`, no `length`. Se pasa
+//     `length / 1px` para quitar la unidad.
+//   - Path necesita viewbox-* para que el sistema de coordenadas
+//     coincida con el tamaño del elemento.
+//   - Evitamos llamar `center` a cualquier propiedad porque colisiona
+//     con el valor de enum del mismo nombre.
+
+export component Knob inherits Rectangle {
+    // ---------- API publica ----------
+    in-out property <float> value: 0;
+    in property <float> min: -12;
+    in property <float> max: 12;
+    in property <string> label: "";
+    in property <string> unit: "dB";
+    // Si true, el arco empieza desde angle-start. Si false, desde
+    // angle-mid (el centro del recorrido).
+    in property <bool> arc-from-start: false;
+    in property <color> accent: #00e5ff;
+    in property <color> body-color: #1c2230;
+    in property <color> text-color: #e8e8ee;
+    in property <color> track-color: #ffffff1a;
+
+    // ---------- Geometria ----------
+    private property <length> box-size: 42px;
+    private property <length> knob-diameter: 28px;
+    private property <length> arc-radius: 18px;
+    private property <length> arc-stroke: 2px;
+    private property <length> cx: box-size / 2;
+
+    // ---------- Angulos ----------
+    private property <float> angle-start: 135;
+    private property <float> angle-end: 405;
+    private property <float> angle-span: angle-end - angle-start;
+    private property <float> angle-mid: (angle-start + angle-end) / 2;
+
+    private property <float> norm: (value - min) / (max - min);
+    private property <float> angle-current: angle-start + norm * angle-span;
+
+    // Angulo desde el que arranca el arco neon.
+    private property <float> arc-origin-angle: arc-from-start ? angle-start : angle-mid;
+    // Span firmado desde el origen al valor actual.
+    private property <float> arc-swept-signed: angle-current - arc-origin-angle;
+    private property <float> arc-swept-abs: Math.abs(arc-swept-signed);
+
+    // Coordenadas del origen del arco neon (en px del viewbox).
+    private property <float> arc-origin-x: (cx + arc-radius * Math.cos(arc-origin-angle * 1deg)) / 1px;
+    private property <float> arc-origin-y: (cx + arc-radius * Math.sin(arc-origin-angle * 1deg)) / 1px;
+
+    // Extremos del recorrido completo (para el track de fondo).
+    private property <float> arc-start-x: (cx + arc-radius * Math.cos(angle-start * 1deg)) / 1px;
+    private property <float> arc-start-y: (cx + arc-radius * Math.sin(angle-start * 1deg)) / 1px;
+    private property <float> arc-end-x:   (cx + arc-radius * Math.cos(angle-end * 1deg)) / 1px;
+    private property <float> arc-end-y:   (cx + arc-radius * Math.sin(angle-end * 1deg)) / 1px;
+
+    // Punto actual del valor.
+    private property <float> arc-cur-x:   (cx + arc-radius * Math.cos(angle-current * 1deg)) / 1px;
+    private property <float> arc-cur-y:   (cx + arc-radius * Math.sin(angle-current * 1deg)) / 1px;
+
+    // Flags del arco SVG.
+    // large-arc: para from-start puede superar 180°. Para from-mid nunca.
+    private property <bool> arc-large: arc-from-start && arc-swept-abs > 180;
+    // sweep: para from-start siempre horario. Para from-mid depende del signo.
+    private property <bool> arc-sweep: arc-from-start ? true : (arc-swept-signed > 0);
+
+    callback changed(float);
+
+    width: 58px;
+    height: 78px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 3px;
+
+        Text {
+            text: root.label;
+            color: root.text-color;
+            font-size: 9px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            width: root.box-size;
+            height: root.box-size;
+            background: transparent;
+
+            // --- Track de fondo (270°) ---
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: root.box-size / 1px;
+                viewbox-height: root.box-size / 1px;
+                stroke: root.track-color;
+                stroke-width: root.arc-stroke;
+                fill: transparent;
+
+                MoveTo { x: root.arc-start-x; y: root.arc-start-y; }
+                ArcTo {
+                    x: root.arc-end-x;
+                    y: root.arc-end-y;
+                    radius-x: root.arc-radius / 1px;
+                    radius-y: root.arc-radius / 1px;
+                    large-arc: true;
+                    sweep: true;
+                }
+            }
+
+            // --- Neon ---
+            // Solo se dibuja si el valor se separa del origen mas de 0.5°.
+            if root.arc-swept-abs > 0.5 : Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: root.box-size / 1px;
+                viewbox-height: root.box-size / 1px;
+                stroke: root.accent;
+                stroke-width: root.arc-stroke;
+                fill: transparent;
+
+                MoveTo { x: root.arc-origin-x; y: root.arc-origin-y; }
+                ArcTo {
+                    x: root.arc-cur-x;
+                    y: root.arc-cur-y;
+                    radius-x: root.arc-radius / 1px;
+                    radius-y: root.arc-radius / 1px;
+                    large-arc: root.arc-large;
+                    sweep: root.arc-sweep;
+                }
+            }
+
+            // Cuerpo del knob.
+            Rectangle {
+                width: root.knob-diameter;
+                height: root.knob-diameter;
+                x: (root.box-size - root.knob-diameter) / 2;
+                y: (root.box-size - root.knob-diameter) / 2;
+                border-radius: root.knob-diameter / 2;
+                background: root.body-color;
+                border-width: 1px;
+                border-color: #ffffff12;
+            }
+
+            // Punto indicador sobre el borde del cuerpo.
+            Rectangle {
+                width: 3px;
+                height: 3px;
+                border-radius: 1.5px;
+                background: root.accent;
+                x: root.cx
+                    + (root.knob-diameter / 2 - 3px) * Math.cos(root.angle-current * 1deg)
+                    - 1.5px;
+                y: root.cx
+                    + (root.knob-diameter / 2 - 3px) * Math.sin(root.angle-current * 1deg)
+                    - 1.5px;
+            }
+
+            // Interaccion: drag vertical.
+            TouchArea {
+                property <float> last-y-f: 0;
+
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down) {
+                        self.last-y-f = self.mouse-y / 1px;
+                    } else if (event.kind == PointerEventKind.move && self.pressed) {
+                        root.value = Math.max(
+                            root.min,
+                            Math.min(
+                                root.max,
+                                root.value + (self.last-y-f - self.mouse-y / 1px)
+                                    * (root.max - root.min) / 100.0
+                            )
+                        );
+                        self.last-y-f = self.mouse-y / 1px;
+                        root.changed(root.value);
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: "\{Math.round(root.value * 10.0) / 10.0} \{root.unit}";
+            color: root.accent;
+            font-size: 9px;
+            horizontal-alignment: center;
+        }
+    }
+}

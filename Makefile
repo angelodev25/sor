@@ -1,2 +1,3 @@
+# Este target ahora no sirve, el backend winit-software da panic
 run:
-	@cd engine && cargo run --release
+	@SLINT_BACKEND=winit-software cargo run

@@ -1,11 +1,13 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::Path;
 use std::error::Error as StdError;
-use rtrb::Consumer;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use crate::audio::eq::ThreeBandEQ;
+use crate::audio::eq::{ThreeBandEQ, SoftClipper};
 use crate::audio::engine::Limiter;
 use crate::audio::loader::{spawn_streamer, Streamer};
+use crate::audio::controls::{Controls, EqParams, LimiterParams, OutputParams};
 
 
 pub struct AudioEngine {
@@ -37,7 +39,7 @@ impl AudioEngine {
         let sample_rate = default_cfg.sample_rate().0;
         let frames = ((sample_rate as f32) * target_ms / 1000.0) as u32;
         let buffer_frames = frames.next_power_of_two().max(512);
-        println!("Buffer frames: {} Frames: {}", buffer_frames, frames);
+        println!("Buffer frames: {} Frames requeridos: {}", buffer_frames, frames);
         let stream_config = cpal::StreamConfig {
             channels: default_cfg.channels(),
             sample_rate: default_cfg.sample_rate(),
@@ -60,7 +62,15 @@ impl AudioEngine {
         self.stream_config.channels
     }
 
-    pub fn play(&mut self, path: &Path, eq: ThreeBandEQ) -> Result<(), Box<dyn StdError>> {
+    pub fn play(
+        &mut self, 
+        path: &Path, 
+        eq: ThreeBandEQ, 
+        controls: Arc<Controls>, 
+        eq_params: Arc<EqParams>,
+        limiter_params: Arc<LimiterParams>,
+        output_params: Arc<OutputParams>,
+    ) -> Result<(), Box<dyn StdError>> {
         let fs = self.sample_rate();
         let channels = self.stream_config.channels as usize;
 
@@ -70,8 +80,10 @@ impl AudioEngine {
         }
 
         // Crear el streamer con ffmpeg
-        let (consumer, streamer) = spawn_streamer(path, fs, channels as u16)?;
+        let (consumer, streamer) = spawn_streamer(path, fs, channels as u16, controls.clone())?;
         self.streamer = Some(streamer);
+        controls.song_loaded.store(true, Ordering::Relaxed);
+        println!("Cancion cargada.");
 
         // Crear elementos de procesamiento de audio para pasarlos al callback
         let mut eq = eq;
@@ -84,11 +96,120 @@ impl AudioEngine {
         );
         let mut consumer = consumer;
 
+        let cb_controls = controls.clone();
+        let cb_eq_params = eq_params.clone();
+        let cb_lim_params = limiter_params.clone();
+        let cb_output = output_params.clone();
+        let initial_db = f32::from_bits(output_params.soft_clip_coeff.load(Ordering::Relaxed));
+        let initial_threshold = 10f32.powf(initial_db / 20.0);
+        let mut soft_clip = SoftClipper::new(initial_threshold);
+
+        // Valores "anteriores" para saber si reconstruimos los biquads.
+        // Como el callback corre en un solo hilo, no necesitan ser atómicos.
+        let mut last_eq: [f32; 10] = [f32::NAN; 10];
+        let mut last_lim_ceiling: f32 = f32::NAN;
+        let mut last_lim = [0, 0, 0];
+        let mut last_soft_clip_db: f32 = initial_db;
+
         // construir el stream de salida
         let stream = self.device.build_output_stream(
             &self.stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                process_callback(data, channels, &mut consumer, &mut eq, &mut limiter);
+                // Aplicar parámetros de eq
+                let p = &cb_eq_params;
+                let eq_values = [
+                    p.get(&p.low_gain),
+                    p.get(&p.low_resonance),
+                    p.get(&p.low_shelf),
+                    p.get(&p.mid_gain),
+                    p.get(&p.mid_presence),
+                    p.get(&p.mid_body),
+                    p.get(&p.high_gain),
+                    p.get(&p.high_shelf),
+                    p.get(&p.high_air),
+                    p.get(&p.master_gain),
+                ];
+
+                let p_lim = &cb_lim_params;
+                let lim_values = [
+                    p_lim.lookahead.load(Ordering::Relaxed),
+                    p_lim.attack.load(Ordering::Relaxed),
+                    p_lim.release.load(Ordering::Relaxed),
+                ];
+                let ceiling_value = f32::from_bits(p_lim.ceiling.load(Ordering::Relaxed));
+
+                // Threshold del soft clipper: leemos en dB, convertimos a lineal.
+                let soft_clip_db = f32::from_bits(cb_output.soft_clip_coeff.load(Ordering::Relaxed));
+                if soft_clip_db != last_soft_clip_db {
+                    let threshold_linear = 10f32.powf(soft_clip_db / 20.0);
+                    soft_clip.set_threshold(threshold_linear);
+                    last_soft_clip_db = soft_clip_db;
+                }
+
+                // Reconstruir solo los biquads cuyos valores cambiaron
+                if eq_values[0] != last_eq[0] { eq.set_low_gain(eq_values[0]); last_eq[0] = eq_values[0]; }
+                if eq_values[1] != last_eq[1] { eq.set_low_resonance(eq_values[1]); last_eq[1] = eq_values[1]; }
+                if eq_values[2] != last_eq[2] { eq.set_low_shelf(eq_values[2]); last_eq[2] = eq_values[2]; }
+                if eq_values[3] != last_eq[3] { eq.set_mid_gain(eq_values[3]); last_eq[3] = eq_values[3]; }
+                if eq_values[4] != last_eq[4] { eq.set_mid_presence(eq_values[4]); last_eq[4] = eq_values[4]; }
+                if eq_values[5] != last_eq[5] { eq.set_mid_body(eq_values[5]); last_eq[5] = eq_values[5]; }
+                if eq_values[6] != last_eq[6] { eq.set_high_gain(eq_values[6]); last_eq[6] = eq_values[6]; }
+                if eq_values[7] != last_eq[7] { eq.set_high_shelf(eq_values[7]); last_eq[7] = eq_values[7]; }
+                if eq_values[8] != last_eq[8] { eq.set_high_air(eq_values[8]); last_eq[8] = eq_values[8]; }
+                if eq_values[9] != last_eq[9] { eq.set_master_gain(eq_values[9]); last_eq[9] = eq_values[9]; }
+
+                // Misma logica con el limitador
+                if last_lim_ceiling != ceiling_value { limiter.set_ceiling_db(ceiling_value); last_lim_ceiling = ceiling_value; }
+                if lim_values[0] != last_lim[0] { println!("Cambiar lookahead"); last_lim[0] = lim_values[0]; }
+                if lim_values[1] != last_lim[1] { println!("Cambiar attack"); last_lim[1] = lim_values[1]; }
+                if lim_values[2] != last_lim[2] { println!("Cambiar release"); last_lim[2] = lim_values[2]; }
+
+                let paused = cb_controls.paused.load(Ordering::Relaxed);
+                let eq_on = cb_output.eq_enabled.load(Ordering::Relaxed);
+                let limiter_on = cb_output.limiter_enabled.load(Ordering::Relaxed);
+                let volume = cb_output.get_volume();
+                let soft_clip_on = cb_output.soft_clip_enabled.load(Ordering::Relaxed);
+
+                // data viene como [L, R, L, R, ...] para estereo
+                let frames = data.len() / channels;
+
+                for frame in 0..frames {
+                    let base = frame * channels;
+
+                    if paused {
+                        for c in 0..channels {
+                            data[base+c] = 0.0;
+                        }
+                        continue;
+                    }
+
+                    // Comprueba que haya un frame completo en el ring antes de consumir
+                    if consumer.slots() < channels {
+                        // Underrun. en la paractica solo pasa al principio de la reproduccion o al final de la cancion.
+                        for c in 0..channels {
+                            data[base+c] = 0.0;
+                        }
+                        continue;
+                    }
+
+                    let l = consumer.pop().unwrap();
+                    let r = consumer.pop().unwrap();
+
+                    // Cadena de DSP
+                    
+                    // EQ
+                    let (l, r) = if eq_on { eq.process(l, r) } else { (l, r) };
+                    // Soft Clipper
+                    let (l, r) = if soft_clip_on { soft_clip.process(l, r) } else { (l, r) };
+                    // Limitador
+                    // Con los parametros acuales su efecto es muy suave, solo se nota en los graves fuertes (bombos pesados)  
+                    // reduciendo la distorsion de los bajos.
+                    let (l, r) = if limiter_on { limiter.process(l, r) } else { (l, r) };
+
+                    // Volumen final.
+                    data[base] = l * volume;
+                    data[base + 1] = r * volume;
+                }
             },
             |err| eprintln!("Error en el stream de audio: {}", err),
             None,
@@ -103,41 +224,5 @@ impl AudioEngine {
         if let Some(stream) = self.stream.take() {
             drop(stream);
         }
-    }
-}
-
-pub fn process_callback(
-    data: &mut [f32],
-    channels: usize,
-    consumer: &mut Consumer<f32>,
-    eq: &mut ThreeBandEQ,
-    limiter: &mut Limiter,
-) {
-    // data viene como [L, R, L, R, ...] para estereo
-    let frames = data.len() / channels;
-
-    for frame in 0..frames {
-        let base = frame * channels;
-
-        // Comprueba que haya un frame completo en el ring antes de consumir
-        if consumer.slots() < channels {
-            // Underrun. en la paractica solo pasa al principio de la reproduccion o al final de la cancion.
-            for c in 0..channels {
-                data[base+c] = 0.0;
-            }
-            continue;
-        }
-
-        let l = consumer.pop().unwrap();
-        let r = consumer.pop().unwrap();
-
-        // Cadena de DSP
-        let (l, r) = eq.process(l, r);
-        // Con los parametros acuales su efecto es muy suave, solo se nota en los graves fuertes (bombos pesados)  
-        // reduciendo la distorsion de los bajos.
-        let (l, r) = limiter.process(l, r);
-
-        data[base] = l;
-        data[base + 1] = r;
     }
 }
