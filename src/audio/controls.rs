@@ -8,6 +8,12 @@ pub struct Controls {
     pub quit: AtomicBool,
     pub frames_played: AtomicU64,
     pub duration_secs: AtomicU32,
+    // Pista vigente. El lector solo señaliza el fin si la suya sigue siéndolo;
+    // así un cambio de pista no recibe el song_ended de la anterior.
+    pub current_track: AtomicU64,
+    // Al cambiar de pista el callback reconstruye la cadena DSP virgen
+    // (colas de biquads y lookahead del limiter), sin memoria del tema viejo.
+    pub dsp_reset: AtomicBool,
 }
 
 impl Controls {
@@ -19,12 +25,19 @@ impl Controls {
             quit: AtomicBool::new(false),
             frames_played: AtomicU64::new(0),
             duration_secs: AtomicU32::new(f32::to_bits(0.0)),
+            current_track: AtomicU64::new(0),
+            dsp_reset: AtomicBool::new(false),
         }
     }
 
     pub fn reset_progress(&self, duration_secs: f32) {
         self.frames_played.store(0, Ordering::Relaxed);
         self.duration_secs.store(f32::to_bits(duration_secs), Ordering::Relaxed);
+    }
+
+    // Rebobina al principio conservando la duración (fin natural en pausa).
+    pub fn rewind(&self) {
+        self.frames_played.store(0, Ordering::Relaxed);
     }
 
     pub fn progress(&self, sample_rate: u32) -> (f32, f32) {

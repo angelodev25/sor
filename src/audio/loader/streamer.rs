@@ -20,10 +20,11 @@ pub struct Streamer {
 }
 
 pub fn spawn_streamer(
-    path: &Path, 
-    sample_rate: u32, 
+    path: &Path,
+    sample_rate: u32,
     channels: u16,
     controls: Arc<Controls>,
+    track_id: u64,
 ) -> Result<(Consumer<f32>, Streamer), Box<dyn StdError>> {
     // convertir a PatBuff porque se movera al hilo
     let path: PathBuf = path.to_path_buf();
@@ -55,12 +56,16 @@ pub fn spawn_streamer(
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
+    let controls_thread = controls.clone();
 
     // Hilo lector que lee de ffmpeg y empuja al buffer
     let handle = thread::spawn(move || {
-        reader_loop(stdout, producer, stop_thread);
-        controls.song_loaded.store(false, Ordering::Relaxed);
-        controls.song_ended.store(true, Ordering::Relaxed);
+        reader_loop(stdout, producer, stop_thread, controls_thread);
+        // Solo la pista vigente señaliza el fin; la de una pista sustituida se calla.
+        if controls.current_track.load(Ordering::Relaxed) == track_id {
+            controls.song_loaded.store(false, Ordering::Relaxed);
+            controls.song_ended.store(true, Ordering::Relaxed);
+        }
     });
 
     Ok((consumer,
@@ -72,7 +77,7 @@ pub fn spawn_streamer(
     ))
 }
 
-pub fn reader_loop(stdout: ChildStdout, mut producer: Producer<f32>, stop: Arc<AtomicBool>) {
+pub fn reader_loop(stdout: ChildStdout, mut producer: Producer<f32>, stop: Arc<AtomicBool>, controls: Arc<Controls>) {
     let mut reader = BufReader::with_capacity(64*1024, stdout);
     let mut chunk = vec![0u8; READ_CHUNK_BYTES];
 
@@ -83,7 +88,18 @@ pub fn reader_loop(stdout: ChildStdout, mut producer: Producer<f32>, stop: Arc<A
 
         // Leer un bloque
         let n = match reader.read(&mut chunk) {
-            Ok(0) => break, // EOF
+            Ok(0) => {
+                // EOF: no señalar el fin hasta que el callback vacíe el
+                // ring; si no, los últimos ~3s se cortan al parar el motor.
+                let capacity = producer.buffer().capacity();
+                while producer.slots() < capacity {
+                    if stop.load(Ordering::Relaxed) || controls.quit.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                break
+            }, // EOF
             Ok(n) => n,
             Err(_) => break, // Error de lectura
         };

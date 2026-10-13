@@ -8,13 +8,18 @@ use crate::audio::eq::{ThreeBandEQ, SoftClipper};
 use crate::audio::engine::Limiter;
 use crate::audio::loader::{spawn_streamer, Streamer};
 use crate::audio::controls::{Controls, EqParams, LimiterParams, OutputParams};
+use crate::audio::source::AudioSource;
 
 
+// Vive en un único hilo gestor (cpal::Stream no es Send): el resto del
+// programa le manda órdenes por canal. El callback cpal lee del AudioSource,
+// compartido con ese hilo mediante el Mutex interno.
 pub struct AudioEngine {
     device: cpal::Device,
     stream_config: cpal::StreamConfig,
     stream: Option<cpal::Stream>,
     streamer: Option<Streamer>,
+    source: Arc<AudioSource>,
 }
 
 impl AudioEngine {
@@ -51,6 +56,7 @@ impl AudioEngine {
             stream_config,
             stream: None,
             streamer: None,
+            source: Arc::new(AudioSource::new()),
         })
     }
 
@@ -62,11 +68,11 @@ impl AudioEngine {
         self.stream_config.channels
     }
 
-    pub fn play(
-        &mut self, 
-        path: &Path, 
-        eq: ThreeBandEQ, 
-        controls: Arc<Controls>, 
+    // Abre el stream una sola vez para toda la sesión. El callback lee del
+    // AudioSource, que empieza vacío (silencio) hasta el primer play_track.
+    pub fn start(
+        &mut self,
+        controls: Arc<Controls>,
         eq_params: Arc<EqParams>,
         limiter_params: Arc<LimiterParams>,
         output_params: Arc<OutputParams>,
@@ -79,14 +85,8 @@ impl AudioEngine {
             return Err(format!("Se esperaban dos canales de salida, se encontraron {}", channels).into());
         }
 
-        // Crear el streamer con ffmpeg
-        let (consumer, streamer) = spawn_streamer(path, fs, channels as u16, controls.clone())?;
-        self.streamer = Some(streamer);
-        controls.song_loaded.store(true, Ordering::Relaxed);
-        println!("Cancion cargada.");
-
         // Crear elementos de procesamiento de audio para pasarlos al callback
-        let mut eq = eq;
+        let mut eq = ThreeBandEQ::new(fs as f32, 180.0, 3500.0);
         let mut limiter = Limiter::new(
             fs as f32,
             7.0, // lookahead ms
@@ -94,9 +94,10 @@ impl AudioEngine {
             80.0, // release ms
             1.5, // celing db
         );
-        let mut consumer = consumer;
 
         let cb_controls = controls.clone();
+        let cb_source = self.source.clone();
+        let cb_fs = fs;
         let cb_eq_params = eq_params.clone();
         let cb_lim_params = limiter_params.clone();
         let cb_output = output_params.clone();
@@ -115,6 +116,19 @@ impl AudioEngine {
         let stream = self.device.build_output_stream(
             &self.stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // Cambio de pista: cadena DSP virgen. Los biquads y el
+                // lookahead del limiter guardan cola del tema anterior y su
+                // respuesta al escalón suena como golpe grave-medio.
+                if cb_controls.dsp_reset.swap(false, Ordering::Relaxed) {
+                    eq = ThreeBandEQ::new(cb_fs as f32, 180.0, 3500.0);
+                    limiter = Limiter::new(cb_fs as f32, 7.0, 2.0, 80.0, 1.5);
+                    last_eq = [f32::NAN; 10];
+                    last_lim_ceiling = f32::NAN;
+                    last_lim = [0, 0, 0];
+                    // NAN fuerza al código de abajo a releer el threshold actual.
+                    last_soft_clip_db = f32::NAN;
+                }
+
                 // Aplicar parámetros de eq
                 let p = &cb_eq_params;
                 let eq_values = [
@@ -174,6 +188,15 @@ impl AudioEngine {
                 let frames = data.len() / channels;
                 let mut consumed: u64 = 0;
 
+                // Fuente actual; None entre pistas: silencio sin cortar el stream.
+                let mut src = cb_source.lock();
+                let Some(consumer) = src.as_mut() else {
+                    for s in data.iter_mut() {
+                        *s = 0.0;
+                    }
+                    return;
+                };
+
                 for frame in 0..frames {
                     let base = frame * channels;
 
@@ -225,9 +248,25 @@ impl AudioEngine {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
-        if let Some(stream) = self.stream.take() {
-            drop(stream);
+    // Cambia de pista sin tocar el stream: mata el ffmpeg anterior, enchufa
+    // el consumer nuevo y marca la pista como vigente para el lector.
+    // El swap y el aviso de reset DSP van bajo el mismo lock: el primer
+    // callback con el consumer nuevo reconstruye la cadena virgen.
+    // Corre en el hilo gestor, dueño único del motor.
+    pub fn play_track(&mut self, path: &Path, track_id: u64, controls: &Arc<Controls>) -> Result<(), Box<dyn StdError>> {
+        let fs = self.sample_rate();
+        let channels = self.stream_config.channels as usize;
+        controls.current_track.store(track_id, Ordering::Relaxed);
+        let (consumer, streamer) = spawn_streamer(path, fs, channels as u16, controls.clone(), track_id)?;
+        {
+            let mut src = self.source.lock();
+            *src = Some(consumer);
+            controls.dsp_reset.store(true, Ordering::Relaxed);
         }
+        // Soltar el viejo mata su ffmpeg y une su lector (ya silenciado por track_id).
+        self.streamer = Some(streamer);
+        controls.song_loaded.store(true, Ordering::Relaxed);
+        println!("Cancion cargada.");
+        Ok(())
     }
 }

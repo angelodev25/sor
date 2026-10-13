@@ -1,8 +1,7 @@
 use std::error::Error as StdError;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 
 mod audio;
 mod playback;
@@ -12,7 +11,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use ui::AppWindow;
 
 use crate::audio::{Controls, EqParams, LimiterParams, OutputParams};
-use crate::playback::{track_entries, PlaybackCtx, start_track};
+use crate::playback::{spawn_engine, track_entries, start_track};
 
 fn main() -> Result<(), Box<dyn StdError>> {
     let ui = AppWindow::new()?;
@@ -106,14 +105,9 @@ fn main() -> Result<(), Box<dyn StdError>> {
     }
 
     let ui_handle = ui.as_weak();
-    let ctx = PlaybackCtx {
-        controls: controls.clone(),
-        eq_params: eq_params.clone(),
-        limiter_params: limiter_params.clone(),
-        output_params: output_params.clone(),
-        generation: Arc::new(AtomicU64::new(0)),
-        engine_lock: Arc::new(Mutex::new(())),
-    };
+
+    // Motor en su hilo gestor + stream persistente. Falla rápido si no hay audio.
+    let ctx = spawn_engine(controls, eq_params, limiter_params, output_params)?;
 
     // Biblioteca inicial: carpeta actual.
     {
