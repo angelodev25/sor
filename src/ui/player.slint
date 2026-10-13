@@ -1,5 +1,5 @@
 import { Slider, ProgressIndicator } from "std-widgets.slint";
-import { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, MusicIcon } from "@lucide";
+import { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, HeadphonesIcon } from "@lucide";
 
 // Boton circular con icono. El icono se pasa como hijo a traves de
 // @children, porque en Slint los iconos de Lucide son componentes
@@ -73,7 +73,7 @@ export component Player inherits Rectangle {
                     HorizontalLayout {
                         alignment: center;
 
-                        MusicIcon {
+                        HeadphonesIcon {
                             size: 90px;
                             colorize: #ffffff50;
                         }
