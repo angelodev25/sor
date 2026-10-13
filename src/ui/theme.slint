@@ -1,0 +1,10 @@
+// Tokens y breakpoints en un solo sitio: para probar otro umbral de
+// responsive se edita solo este fichero, no cada vista.
+export global LayoutBreakpoints {
+    // Ancho a partir del cual aparece el layout ancho (sidebar + biblioteca
+    // + columna de reproducción). Sin consenso aún: ajústalo aquí.
+    in property <length> wide: 1100px;
+    // Alto mínimo para mostrar Player y EQ juntos en la columna derecha;
+    // por debajo se alternan con toggle.
+    in property <length> tall: 700px;
+}

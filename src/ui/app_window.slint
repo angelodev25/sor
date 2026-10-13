@@ -1,7 +1,11 @@
 import { Navbar } from "navbar.slint";
+import { Sidebar } from "sidebar.slint";
 import { Player } from "player.slint";
 import { EqPanel } from "eq_panel.slint";
-import { LibraryView, TrackEntry } from "library.slint";
+import { LibraryView } from "library.slint";
+import { NowPlaying } from "now_playing.slint";
+import { TrackEntry } from "models.slint";
+import { LayoutBreakpoints } from "theme.slint";
 
 export component AppWindow inherits Window {
     title: "Sor";
@@ -21,9 +25,11 @@ export component AppWindow inherits Window {
     in-out property <string> duration-label: "00:00";
     in-out property <image> cover;
     in-out property <bool> has-cover: false;
-    // Vista actual según el navbar (0=Reproduciendo, 1=Biblioteca).
+    // Vista actual según navbar/sidebar (0=Reproduciendo, 1=Biblioteca).
     // shortcut: Buscar/Ajustes aún no tienen vista, muestran Reproduciendo.
     in-out property <int> current-view: 0;
+    // Tab de la columna derecha en modo ancho-bajo (0=Player, 1=EQ).
+    in-out property <int> right-tab: 0;
 
     // ---- Biblioteca (modelo real desde Rust) ----
     in-out property <[TrackEntry]> tracks;
@@ -60,8 +66,12 @@ export component AppWindow inherits Window {
     callback open-folder();
     callback track-clicked(int);
 
-    VerticalLayout {
-        // ---------- Navbar ----------
+    // Umbrales centralizados en theme.slint (un solo sitio a editar).
+    property <bool> is-wide: root.width >= LayoutBreakpoints.wide;
+    property <bool> is-tall: root.height >= LayoutBreakpoints.tall;
+
+    // ---------- Modo angosto: Navbar + una vista ----------
+    if !root.is-wide: VerticalLayout {
         Navbar {
             active-index <=> root.current-view;
             nav-changed(idx) => {
@@ -69,7 +79,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        // ---------- Vista Biblioteca ----------
         if root.current-view == 1: LibraryView {
             vertical-stretch: 1;
             tracks <=> root.tracks;
@@ -79,7 +88,6 @@ export component AppWindow inherits Window {
             track-clicked(idx) => { root.track-clicked(idx); }
         }
 
-        // ---------- Contenido: Player + EqPanel ----------
         if root.current-view != 1: HorizontalLayout {
             // El Player toma todo el espacio disponible.
             Player {
@@ -96,15 +104,14 @@ export component AppWindow inherits Window {
                 play-pause => { root.play-pause(); }
             }
 
-            // El EqPanel tiene ancho fijo. Al estar dentro del mismo
-            // HorizontalLayout, su altura es automaticamente la misma
-            // que la del Player (ambos llenan el alto disponible).
+            // El EqPanel tiene ancho fijo y ocupa todo el alto disponible
+            // (altura automática del HorizontalLayout); sus grupos van
+            // centrados (ver eq_panel.slint).
             EqPanel {
                 min-width: 200px;
                 max-width: 200px;
                 horizontal-stretch: 0;
 
-                // Conectamos las propiedades del EqPanel con las de AppWindow.
                 low-gain       <=> root.eq-low-gain;
                 low-shelf      <=> root.eq-low-shelf;
                 low-resonance  <=> root.eq-low-resonance;
@@ -125,11 +132,75 @@ export component AppWindow inherits Window {
                 volume <=> root.eq-volume;
                 soft-clipping <=> root.soft-clipping;
                 soft-clip-enabled   <=> root.soft-clip-enabled;
-                
+
                 output-changed => { root.output-changed(); }
                 eq-changed => {root.eq-changed();}
                 limiter-changed => {root.limiter-changed();}
             }
+        }
+    }
+
+    // ---------- Modo ancho: sidebar + biblioteca + reproducción (<50%) ----------
+    // Solo la Biblioteca tiene scroll interno; la columna derecha nunca.
+    if root.is-wide: HorizontalLayout {
+        Sidebar {
+            active-index <=> root.current-view;
+            nav-changed(idx) => {
+                root.current-view = idx;
+            }
+        }
+
+        LibraryView {
+            horizontal-stretch: 1;
+            tracks <=> root.tracks;
+            folder-path <=> root.folder-path;
+            selected-index <=> root.selected-track;
+            open-folder => { root.open-folder(); }
+            track-clicked(idx) => { root.track-clicked(idx); }
+        }
+
+        NowPlaying {
+            min-width: 340px;
+            max-width: 420px;
+            horizontal-stretch: 0;
+            show-both: root.is-tall;
+            tab <=> root.right-tab;
+
+            track-title <=> root.track-title;
+            track-artist <=> root.track-artist;
+            is-playing  <=> root.is-playing;
+            is-loading  <=> root.is-loading;
+            progress <=> root.progress;
+            elapsed-label <=> root.elapsed-label;
+            duration-label <=> root.duration-label;
+            cover <=> root.cover;
+            has-cover <=> root.has-cover;
+            play-pause => { root.play-pause(); }
+
+            low-gain       <=> root.eq-low-gain;
+            low-shelf      <=> root.eq-low-shelf;
+            low-resonance  <=> root.eq-low-resonance;
+
+            mid-gain       <=> root.eq-mid-gain;
+            mid-body       <=> root.eq-mid-body;
+            mid-presence   <=> root.eq-mid-presence;
+
+            high-gain      <=> root.eq-high-gain;
+            high-shelf     <=> root.eq-high-shelf;
+            high-air       <=> root.eq-high-air;
+
+            drive    <=> root.eq-master-gain;
+
+            limiter-ceiling <=> root.eq-limiter-ceiling;
+            limiter-enabled <=> root.eq-limiter-enabled;
+
+            volume <=> root.eq-volume;
+            soft-clipping <=> root.soft-clipping;
+            soft-clip-enabled   <=> root.soft-clip-enabled;
+
+            output-changed => { root.output-changed(); }
+            eq-changed => {root.eq-changed();}
+            limiter-changed => {root.limiter-changed();}
         }
     }
 }

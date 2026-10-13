@@ -1,0 +1,10 @@
+// Modelo de fila compartido entre Rust y la UI. Lo provee Rust escaneando
+// la carpeta (ver playback.rs); sin tipos de audio aquí, solo datos de vista.
+export struct TrackEntry {
+    title: string,
+    artist: string,
+    file-name: string,
+    path: string,
+    cover: image,
+    has-cover: bool,
+}

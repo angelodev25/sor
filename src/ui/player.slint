@@ -38,6 +38,8 @@ export component Player inherits Rectangle {
     in-out property <string> duration-label: "00:00";
     in-out property <image> cover;
     in-out property <bool> has-cover: false;
+    // Modo compacto para la columna derecha: menos aire, misma info.
+    in property <bool> compact: false;
 
     callback play-pause();
 
@@ -45,16 +47,16 @@ export component Player inherits Rectangle {
 
     VerticalLayout {
         alignment: center;
-        spacing: 18px;
-        padding: 32px;
+        spacing: root.compact ? 8px : 18px;
+        padding: root.compact ? 12px : 32px;
 
         // --- Caratula centrada horizontalmente ---
         HorizontalLayout {
             alignment: center;
 
             Rectangle {
-                width: 260px;
-                height: 260px;
+                width: root.compact ? 140px : 260px;
+                height: root.compact ? 140px : 260px;
                 border-radius: 20px;
                 background: @linear-gradient(135deg, #1a2029, #2d3748);
                 border-width: 1px;
@@ -74,7 +76,7 @@ export component Player inherits Rectangle {
                         alignment: center;
 
                         HeadphonesIcon {
-                            size: 90px;
+                            size: root.compact ? 56px : 90px;
                             colorize: #ffffff50;
                         }
                     }

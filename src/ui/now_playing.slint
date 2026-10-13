@@ -1,0 +1,186 @@
+import { Player } from "player.slint";
+import { EqPanel } from "eq_panel.slint";
+
+// Toggle Player/EQ para el modo ancho-bajo, en la cabecera de la columna.
+component RightTab inherits Rectangle {
+    in-out property <int> tab: 0;
+
+    height: 34px;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: 4px;
+        alignment: center;
+
+        Rectangle {
+            width: 120px;
+            height: 26px;
+            border-radius: 6px;
+            background: root.tab == 0 ? #1c2230 : transparent;
+            border-width: 1px;
+            border-color: root.tab == 0 ? #00e5ff : #ffffff20;
+
+            Text {
+                text: "Reproducción";
+                color: root.tab == 0 ? #00e5ff : #8f8f9c;
+                font-size: 11px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.tab = 0; }
+            }
+        }
+
+        Rectangle {
+            width: 70px;
+            height: 26px;
+            border-radius: 6px;
+            background: root.tab == 1 ? #1c2230 : transparent;
+            border-width: 1px;
+            border-color: root.tab == 1 ? #00e5ff : #ffffff20;
+
+            Text {
+                text: "EQ";
+                color: root.tab == 1 ? #00e5ff : #8f8f9c;
+                font-size: 11px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.tab = 1; }
+            }
+        }
+    }
+}
+
+// Columna derecha del modo ancho: Player arriba + EQ abajo con NIVELES en
+// tira lateral. Solo la Biblioteca tiene scroll interno; esta columna nunca.
+export component NowPlaying inherits Rectangle {
+    // --- Player (mismas props que Player) ---
+    in-out property <string> track-title;
+    in-out property <string> track-artist;
+    in-out property <bool> is-playing;
+    in-out property <bool> is-loading;
+    in-out property <float> progress;
+    in-out property <string> elapsed-label;
+    in-out property <string> duration-label;
+    in-out property <image> cover;
+    in-out property <bool> has-cover;
+    callback play-pause();
+
+    // --- EQ (mismas props que EqPanel) ---
+    in-out property <float> low-gain;
+    in-out property <float> low-shelf;
+    in-out property <float> low-resonance;
+    in-out property <float> mid-gain;
+    in-out property <float> mid-body;
+    in-out property <float> mid-presence;
+    in-out property <float> high-gain;
+    in-out property <float> high-shelf;
+    in-out property <float> high-air;
+    in-out property <float> drive;
+    in-out property <float> volume;
+    in-out property <float> soft-clipping;
+    in-out property <bool> soft-clip-enabled;
+    in-out property <float> limiter-ceiling;
+    in-out property <bool> limiter-enabled;
+    callback eq-changed();
+    callback output-changed();
+    callback limiter-changed();
+
+    // true = cabe todo (Player + EQ); false = una sola vista con toggle.
+    in property <bool> show-both: true;
+    // Vista visible cuando no cabe todo (0=Player, 1=EQ).
+    in-out property <int> tab: 0;
+
+    background: #10151b;
+
+    if root.show-both: VerticalLayout {
+        Player {
+            compact: true;
+            track-title <=> root.track-title;
+            track-artist <=> root.track-artist;
+            is-playing <=> root.is-playing;
+            is-loading <=> root.is-loading;
+            progress <=> root.progress;
+            elapsed-label <=> root.elapsed-label;
+            duration-label <=> root.duration-label;
+            cover <=> root.cover;
+            has-cover <=> root.has-cover;
+            play-pause => { root.play-pause(); }
+        }
+
+        EqPanel {
+            vertical-stretch: 1;
+            niveles-side: true;
+            low-gain <=> root.low-gain;
+            low-shelf <=> root.low-shelf;
+            low-resonance <=> root.low-resonance;
+            mid-gain <=> root.mid-gain;
+            mid-body <=> root.mid-body;
+            mid-presence <=> root.mid-presence;
+            high-gain <=> root.high-gain;
+            high-shelf <=> root.high-shelf;
+            high-air <=> root.high-air;
+            drive <=> root.drive;
+            volume <=> root.volume;
+            soft-clipping <=> root.soft-clipping;
+            soft-clip-enabled <=> root.soft-clip-enabled;
+            limiter-ceiling <=> root.limiter-ceiling;
+            limiter-enabled <=> root.limiter-enabled;
+            eq-changed => { root.eq-changed(); }
+            output-changed => { root.output-changed(); }
+            limiter-changed => { root.limiter-changed(); }
+        }
+    }
+
+    if !root.show-both: VerticalLayout {
+        RightTab {
+            tab <=> root.tab;
+        }
+
+        if root.tab == 0: Player {
+            vertical-stretch: 1;
+            compact: true;
+            track-title <=> root.track-title;
+            track-artist <=> root.track-artist;
+            is-playing <=> root.is-playing;
+            is-loading <=> root.is-loading;
+            progress <=> root.progress;
+            elapsed-label <=> root.elapsed-label;
+            duration-label <=> root.duration-label;
+            cover <=> root.cover;
+            has-cover <=> root.has-cover;
+            play-pause => { root.play-pause(); }
+        }
+
+        if root.tab != 0: EqPanel {
+            vertical-stretch: 1;
+            low-gain <=> root.low-gain;
+            low-shelf <=> root.low-shelf;
+            low-resonance <=> root.low-resonance;
+            mid-gain <=> root.mid-gain;
+            mid-body <=> root.mid-body;
+            mid-presence <=> root.mid-presence;
+            high-gain <=> root.high-gain;
+            high-shelf <=> root.high-shelf;
+            high-air <=> root.high-air;
+            drive <=> root.drive;
+            volume <=> root.volume;
+            soft-clipping <=> root.soft-clipping;
+            soft-clip-enabled <=> root.soft-clip-enabled;
+            limiter-ceiling <=> root.limiter-ceiling;
+            limiter-enabled <=> root.limiter-enabled;
+            eq-changed => { root.eq-changed(); }
+            output-changed => { root.output-changed(); }
+            limiter-changed => { root.limiter-changed(); }
+        }
+    }
+}

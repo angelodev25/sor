@@ -20,7 +20,7 @@ component EqGroup inherits Rectangle {
         }
 
         HorizontalLayout {
-            alignment: start;
+            alignment: center;
             spacing: 4px;
             @children
         }
@@ -123,6 +123,193 @@ component ToggleButton inherits Rectangle {
     }
 }
 
+// Slider de volumen con su etiqueta de porcentaje.
+component VolumenBlock inherits Rectangle {
+    in-out property <float> volume: 1.0;
+
+    callback output-changed();
+
+    background: transparent;
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        spacing: 2px;
+        vertical-stretch: 0;
+
+        HorizontalLayout {
+            Text {
+                text: "Volumen";
+                color: #8f8f9c;
+                font-size: 9px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Text {
+                text: "\{Math.round(root.volume * 100)}%";
+                color: #00e5ff;
+                font-size: 9px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+
+        NeonSlider {
+            value <=> root.volume;
+            min: 0;
+            max: 1;
+            changed(v) => { root.output-changed(); }
+        }
+    }
+}
+
+// Las tres últimas perillas (Drive/Clip/Techo): en fila para el modo
+// angosto, en columna para la tira lateral del modo ancho-alto.
+component NivelesBlock inherits Rectangle {
+    in-out property <float> drive: 1.0;
+    in-out property <float> soft-clipping: -3.0;
+    in-out property <bool> soft-clip-enabled: true;
+    in-out property <float> limiter-ceiling: -0.3;
+    in-out property <bool> limiter-enabled: true;
+    in property <bool> vertical: false;
+
+    callback eq-changed();
+    callback output-changed();
+    callback limiter-changed();
+
+    background: transparent;
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 4px;
+
+        Text {
+            text: "NIVELES";
+            color: #8f8f9c;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            horizontal-alignment: left;
+            height: 12px;
+        }
+
+        if !root.vertical: HorizontalLayout {
+            spacing: 10px;
+            alignment: center;
+
+            Knob {
+                label: "Drive";
+                min: 0;
+                max: 1.5;
+                unit: "";
+                value <=> root.drive;
+                arc-from-start: true;
+                changed(v) => { root.eq-changed(); }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+
+                Knob {
+                    label: "Clip";
+                    min: -15;
+                    max: 2;
+                    unit: "dB";
+                    value <=> root.soft-clipping;
+                    arc-from-start: true;
+                    changed(v) => { root.output-changed(); }
+                }
+
+                ToggleButton {
+                    checked <=> root.soft-clip-enabled;
+                    text: root.soft-clip-enabled ? "ON" : "OFF";
+                    toggled => { root.output-changed(); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+
+                Knob {
+                    label: "Techo";
+                    min: -6;
+                    max: 3;
+                    unit: "dB";
+                    value <=> root.limiter-ceiling;
+                    arc-from-start: true;
+                    changed(v) => { root.limiter-changed(); }
+                }
+
+                ToggleButton {
+                    checked <=> root.limiter-enabled;
+                    text: root.limiter-enabled ? "ON" : "OFF";
+                    toggled => { root.limiter-changed(); }
+                }
+            }
+        }
+
+        if root.vertical: VerticalLayout {
+            spacing: 8px;
+            alignment: center;
+
+            Knob {
+                label: "Drive";
+                min: 0;
+                max: 1.5;
+                unit: "";
+                value <=> root.drive;
+                arc-from-start: true;
+                changed(v) => { root.eq-changed(); }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+
+                Knob {
+                    label: "Clip";
+                    min: -15;
+                    max: 2;
+                    unit: "dB";
+                    value <=> root.soft-clipping;
+                    arc-from-start: true;
+                    changed(v) => { root.output-changed(); }
+                }
+
+                ToggleButton {
+                    checked <=> root.soft-clip-enabled;
+                    text: root.soft-clip-enabled ? "ON" : "OFF";
+                    toggled => { root.output-changed(); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+
+                Knob {
+                    label: "Techo";
+                    min: -6;
+                    max: 3;
+                    unit: "dB";
+                    value <=> root.limiter-ceiling;
+                    arc-from-start: true;
+                    changed(v) => { root.limiter-changed(); }
+                }
+
+                ToggleButton {
+                    checked <=> root.limiter-enabled;
+                    text: root.limiter-enabled ? "ON" : "OFF";
+                    toggled => { root.limiter-changed(); }
+                }
+            }
+        }
+    }
+}
+
 // Panel principal
 export component EqPanel inherits Rectangle {
     // --- EQ ---
@@ -144,6 +331,8 @@ export component EqPanel inherits Rectangle {
     in-out property <bool> soft-clip-enabled: true;
     in-out property <float> limiter-ceiling: -0.3;
     in-out property <bool> limiter-enabled: true;
+    // true = NIVELES en tira lateral derecha (modo ancho-alto).
+    in property <bool> niveles-side: false;
 
     callback eq-changed();
     callback output-changed();
@@ -151,7 +340,8 @@ export component EqPanel inherits Rectangle {
 
     background: #10151b;
 
-    VerticalLayout {
+    // --- Modo angosto: todo apilado, NIVELES abajo en fila ---
+    if !root.niveles-side: VerticalLayout {
         padding: 6px;
         spacing: 8px;
         alignment: start;
@@ -164,38 +354,11 @@ export component EqPanel inherits Rectangle {
             height: 16px;
         }
 
-        // --- Volumen (slider) ---
-        VerticalLayout {
-            spacing: 2px;
-            vertical-stretch: 0;
-
-            HorizontalLayout {
-                Text {
-                    text: "Volumen";
-                    color: #8f8f9c;
-                    font-size: 9px;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: "\{Math.round(root.volume * 100)}%";
-                    color: #00e5ff;
-                    font-size: 9px;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-            }
-
-            NeonSlider {
-                value <=> root.volume;
-                min: 0;
-                max: 1;
-                changed(v) => { root.output-changed(); }
-            }
+        VolumenBlock {
+            volume <=> root.volume;
+            output-changed => { root.output-changed(); }
         }
 
-        // --- Grupos EQ ---
         EqGroup {
             title: "GRAVES";
             Knob { label: "Ganancia";   value <=> root.low-gain;      changed(v) => { root.eq-changed(); } }
@@ -217,91 +380,90 @@ export component EqPanel inherits Rectangle {
             Knob { label: "Aire";     value <=> root.high-air;   changed(v) => { root.eq-changed(); } }
         }
 
-        // Espaciador flexible.
+        // Espaciador flexible: el panel ocupa todo el alto disponible.
         Rectangle {
             vertical-stretch: 1;
             background: transparent;
         }
 
-        // NIVELES
-        Rectangle {
-            background: transparent;
-            vertical-stretch: 0;
+        NivelesBlock {
+            drive <=> root.drive;
+            soft-clipping <=> root.soft-clipping;
+            soft-clip-enabled <=> root.soft-clip-enabled;
+            limiter-ceiling <=> root.limiter-ceiling;
+            limiter-enabled <=> root.limiter-enabled;
+            eq-changed => { root.eq-changed(); }
+            output-changed => { root.output-changed(); }
+            limiter-changed => { root.limiter-changed(); }
+        }
+    }
 
-            VerticalLayout {
-                alignment: start;
-                spacing: 4px;
+    // --- Modo ancho-alto: NIVELES en tira lateral con separador claro ---
+    if root.niveles-side: HorizontalLayout {
+        padding: 6px;
+        spacing: 8px;
 
-                Text {
-                    text: "NIVELES";
-                    color: #8f8f9c;
-                    font-size: 9px;
-                    font-weight: 700;
-                    letter-spacing: 2px;
-                    horizontal-alignment: left;
-                    height: 12px;
-                }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+            alignment: start;
 
-                HorizontalLayout {
-                    spacing: 10px;
-                    alignment: start;
-
-                    // --- Columna 1: Drive ---
-                    Knob {
-                        label: "Drive";
-                        min: 0;
-                        max: 1.5;
-                        unit: "";
-                        value <=> root.drive;
-                        arc-from-start: true;
-                        changed(v) => { root.eq-changed(); }
-                    }
-
-                    // --- Columna 2: Clip ---
-                    VerticalLayout {
-                        spacing: 2px;
-                        alignment: center;
-
-                        Knob {
-                            label: "Clip";
-                            min: -15;
-                            max: 2;
-                            unit: "dB";
-                            value <=> root.soft-clipping;
-                            arc-from-start: true;
-                            changed(v) => { root.output-changed(); }
-                        }
-
-                        ToggleButton {
-                            checked <=> root.soft-clip-enabled;
-                            text: root.soft-clip-enabled ? "ON" : "OFF";
-                            toggled => { root.output-changed(); }
-                        }
-                    }
-
-                    // --- Columna 3: Techo ---
-                    VerticalLayout {
-                        spacing: 2px;
-                        alignment: center;
-
-                        Knob {
-                            label: "Techo";
-                            min: -6;
-                            max: 3;
-                            unit: "dB";
-                            value <=> root.limiter-ceiling;
-                            arc-from-start: true;
-                            changed(v) => { root.limiter-changed(); }
-                        }
-
-                        ToggleButton {
-                            checked <=> root.limiter-enabled;
-                            text: root.limiter-enabled ? "ON" : "OFF";
-                            toggled => { root.limiter-changed(); }
-                        }
-                    }
-                }
+            Text {
+                text: "Ecualizador";
+                color: #f5f5fa;
+                font-size: 13px;
+                font-weight: 700;
+                height: 16px;
             }
+
+            VolumenBlock {
+                volume <=> root.volume;
+                output-changed => { root.output-changed(); }
+            }
+
+            EqGroup {
+                title: "GRAVES";
+                Knob { label: "Ganancia";   value <=> root.low-gain;      changed(v) => { root.eq-changed(); } }
+                Knob { label: "Shelf";      value <=> root.low-shelf;     changed(v) => { root.eq-changed(); } }
+                Knob { label: "Resonancia"; value <=> root.low-resonance; changed(v) => { root.eq-changed(); } }
+            }
+
+            EqGroup {
+                title: "MEDIOS";
+                Knob { label: "Ganancia";  value <=> root.mid-gain;     changed(v) => { root.eq-changed(); } }
+                Knob { label: "Cuerpo";    value <=> root.mid-body;     changed(v) => { root.eq-changed(); } }
+                Knob { label: "Presencia"; value <=> root.mid-presence; changed(v) => { root.eq-changed(); } }
+            }
+
+            EqGroup {
+                title: "AGUDOS";
+                Knob { label: "Ganancia"; value <=> root.high-gain;  changed(v) => { root.eq-changed(); } }
+                Knob { label: "Shelf";    value <=> root.high-shelf; changed(v) => { root.eq-changed(); } }
+                Knob { label: "Aire";     value <=> root.high-air;   changed(v) => { root.eq-changed(); } }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+            }
+        }
+
+        Rectangle {
+            width: 1px;
+            background: #ffffff14;
+        }
+
+        NivelesBlock {
+            width: 100px;
+            vertical: true;
+            drive <=> root.drive;
+            soft-clipping <=> root.soft-clipping;
+            soft-clip-enabled <=> root.soft-clip-enabled;
+            limiter-ceiling <=> root.limiter-ceiling;
+            limiter-enabled <=> root.limiter-enabled;
+            eq-changed => { root.eq-changed(); }
+            output-changed => { root.output-changed(); }
+            limiter-changed => { root.limiter-changed(); }
         }
     }
 }

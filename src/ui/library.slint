@@ -1,15 +1,7 @@
+import { TrackEntry } from "models.slint";
 import { TrackRow } from "library_row.slint";
 import { LineEdit } from "std-widgets.slint";
 import { FolderOpenIcon, FileAudioIcon } from "@lucide";
-
-export struct TrackEntry {
-    title: string,
-    artist: string,
-    file-name: string,
-    path: string,
-    cover: image,
-    has-cover: bool,
-}
 
 // Vista Biblioteca: explorador de archivos de audio. Rust provee `tracks`
 // escaneando `folder-path`; los callbacks piden reescanear o reproducir.
