@@ -1,38 +1,17 @@
-use std::path::Path;
 use std::error::Error as StdError;
-use std::sync::atomic::Ordering;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod audio;
+mod playback;
 mod ui;
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use ui::AppWindow;
 
-use crate::audio::{
-    engine::AudioEngine,
-    eq::ThreeBandEQ,
-    metadata,
-    Controls,
-    OutputParams,
-    EqParams,
-    LimiterParams
-};
-
-fn cover_to_image(bytes: &[u8]) -> Option<slint::Image> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgb8();
-    let (w, h) = (img.width(), img.height());
-    // shortcut: carátulas gigantes se reescalan a 512px, ampliar a caché en disco si hace falta.
-    let img = if w.max(h) > 512 {
-        image::imageops::thumbnail(&img, 512, 512)
-    } else {
-        img
-    };
-    let mut buf = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(img.width(), img.height());
-    buf.make_mut_bytes().copy_from_slice(&img);
-    Some(slint::Image::from_rgb8(buf))
-}
+use crate::audio::{Controls, EqParams, LimiterParams, OutputParams};
+use crate::playback::{track_entries, PlaybackCtx, start_track};
 
 fn main() -> Result<(), Box<dyn StdError>> {
     let ui = AppWindow::new()?;
@@ -126,12 +105,49 @@ fn main() -> Result<(), Box<dyn StdError>> {
     }
 
     let ui_handle = ui.as_weak();
-    let controls_ui = controls.clone();
-    let eq_params_ui = eq_params.clone();
-    let limiter_params_ui = limiter_params.clone();
-    let output_params_ui = output_params.clone();
+    let ctx = PlaybackCtx {
+        controls: controls.clone(),
+        eq_params: eq_params.clone(),
+        limiter_params: limiter_params.clone(),
+        output_params: output_params.clone(),
+        generation: Arc::new(AtomicU64::new(0)),
+    };
+
+    // Biblioteca inicial: carpeta actual.
+    {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        ui.set_folder_path(cwd.to_string_lossy().into_owned().into());
+        ui.set_tracks(ModelRc::new(VecModel::from(track_entries(&cwd))));
+    }
+
+    // Reescanea la ruta escrita en la barra de la Biblioteca.
+    {
+        let ui_handle_scan = ui.as_weak();
+        ui.on_open_folder(move || {
+            let Some(ui) = ui_handle_scan.upgrade() else { return };
+            let dir = PathBuf::from(ui.get_folder_path().as_str());
+            ui.set_tracks(ModelRc::new(VecModel::from(track_entries(&dir))));
+            ui.set_selected_track(-1);
+        });
+    }
+
+    // Click en una fila: reproduce esa pista.
+    {
+        let ui_handle_track = ui.as_weak();
+        let ctx_track = ctx.clone();
+        ui.on_track_clicked(move |idx| {
+            let Some(ui) = ui_handle_track.upgrade() else { return };
+            if ui.get_is_loading() {
+                return;
+            }
+            let Some(track) = ui.get_tracks().row_data(idx as usize) else { return };
+            ui.set_selected_track(idx);
+            start_track(PathBuf::from(track.path.as_str()), &ui, ui_handle_track.clone(), &ctx_track);
+        });
+    }
 
     // Callback del boton play/pause de la ui
+    let ctx_play = ctx.clone();
     ui.on_play_pause(move || {
         let ui = ui_handle.unwrap();
 
@@ -139,88 +155,26 @@ fn main() -> Result<(), Box<dyn StdError>> {
             return;
         }
 
-        if !controls_ui.song_loaded.load(Ordering::Relaxed) {
-            ui.set_is_loading(true);
-            // Establecer en false el flag de song_ended antes de iniciar la reproduccion para que la ui no piense que
-            // la cancion ha terminado antes de tiempo y ademas permitir que la ui pueda reiniciar la cancion si el usuario desea.
-            controls_ui.song_ended.store(false, Ordering::Relaxed);
-
-            let ui_weak = ui_handle.clone();
-            let controls_thread = controls_ui.clone();
-            let eq_params_thread = eq_params_ui.clone();
-            let limiter_params_thread = limiter_params_ui.clone();
-            let output_params_thread = output_params_ui.clone();
-            let path = Path::new("BAD OMENS  Like A Villain (Official Music Video).m4a").to_path_buf();
-
-            // Lee metadatos en el hilo de UI: es rápido y la UI muestra título/artista al instante.
-            let info = metadata::read_metadata(&path);
-            ui.set_track_title(info.title.clone().into());
-            ui.set_track_artist(info.artist.clone().into());
-            ui.set_duration_label(metadata::fmt_mmss(info.duration_secs).into());
-            ui.set_elapsed_label("00:00".into());
-            ui.set_progress(0.0);
-            match info.cover_bytes.as_deref().and_then(cover_to_image) {
-                Some(img) => { ui.set_cover(img); ui.set_has_cover(true); }
-                None => ui.set_has_cover(false),
+        if !ctx_play.controls.song_loaded.load(Ordering::Relaxed) {
+            // Primera reproducción: seleccionada o primera de la lista.
+            let tracks = ui.get_tracks();
+            let idx = ui.get_selected_track();
+            let row = (idx >= 0)
+                .then(|| tracks.row_data(idx as usize))
+                .flatten()
+                .or_else(|| if tracks.row_count() > 0 { tracks.row_data(0) } else { None });
+            let Some(track) = row else {
+                ui.set_track_title("No hay audio en la carpeta".into());
+                return;
+            };
+            if idx < 0 {
+                ui.set_selected_track(0);
             }
-            controls_ui.reset_progress(info.duration_secs);
-
-            thread::spawn(move || {
-                let mut engine = match AudioEngine::new() {
-                    Ok(e) => e,
-                    Err(e) => {
-                        eprintln!("Error al crear el motor: {e}");
-                        return;
-                    }
-                };
-                println!("Dispositivo reconocido. Sample rate: {} Hz, {} canales", engine.sample_rate(), engine.channels());
-
-                let eq = ThreeBandEQ::new(engine.sample_rate() as f32, 180.0, 3500.0);
-                let sample_rate = engine.sample_rate();
-
-                if let Err(e) = engine.play(
-                    &path, 
-                    eq, 
-                    controls_thread.clone(), 
-                    eq_params_thread, 
-                    limiter_params_thread,
-                    output_params_thread
-                ) {
-                    eprintln!("Error al arrancar stream: {e}");
-                    let _ = ui_weak.upgrade_in_event_loop(|ui| {
-                        ui.set_is_loading(false);
-                        ui.set_track_title("Error al cargar".into());
-                    });
-                    return;
-                }
-
-                let _ = ui_weak.upgrade_in_event_loop(|ui| {
-                    ui.set_is_loading(false);
-                    ui.set_is_playing(true);
-                });
-
-                // Se bloquea el hilo hasta que la cancion termine o el usuario pida salir,
-                // actualizando la barra de progreso por el camino.
-                while !controls_thread.song_ended.load(Ordering::Relaxed) && !controls_thread.quit.load(Ordering::Relaxed) {
-                    let (ratio, elapsed) = controls_thread.progress(sample_rate);
-                    let label = metadata::fmt_mmss(elapsed);
-                    let _ = ui_weak.upgrade_in_event_loop(move |ui| {
-                        ui.set_progress(ratio);
-                        ui.set_elapsed_label(label.into());
-                    });
-                    thread::sleep(std::time::Duration::from_millis(250));
-                }
-
-                let _ = ui_weak.upgrade_in_event_loop(|ui| {
-                    ui.set_is_playing(false);
-                });
-                
-                engine.stop();
-            });
+            start_track(PathBuf::from(track.path.as_str()), &ui, ui_handle.clone(), &ctx_play);
         } else {
             // Pausa / reanudar.
             let resume = !ui.get_is_playing();
-            controls_ui.paused.store(!resume, Ordering::Relaxed);
+            ctx_play.controls.paused.store(!resume, Ordering::Relaxed);
             ui.set_is_playing(resume);
         }
     });

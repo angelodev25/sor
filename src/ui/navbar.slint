@@ -4,6 +4,8 @@ export component Navbar inherits Rectangle {
     // Callback que se dispara cuando el usuario clickea un item.
     // Recibe el indice (0=Reproduciendo, 1=Biblioteca, 2=Buscar, 3=Ajustes).
     callback nav-changed(int);
+    // Item resaltado con la línea neón.
+    in-out property <int> active-index: 0;
 
     height: 60px;
     background: #0a0d12;
@@ -61,10 +63,10 @@ export component Navbar inherits Rectangle {
                 spacing: 8px;
                 alignment: center;
 
-                MusicIcon { size: 18px; colorize: #00e5ff; vertical-alignment: center; y: (parent.height - self.height) / 2; }
+                MusicIcon { size: 18px; colorize: root.active-index == 0 ? #00e5ff : #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
                 Text {
                     text: "Reproduciendo";
-                    color: #00e5ff;
+                    color: root.active-index == 0 ? #00e5ff : #8f8f9c;
                     font-size: 14px;
                     font-weight: 600;
                     vertical-alignment: center;
@@ -72,7 +74,7 @@ export component Navbar inherits Rectangle {
             }
 
             // Linea neon inferior que marca el activo.
-            Rectangle {
+            if root.active-index == 0: Rectangle {
                 height: 2px;
                 y: parent.height - 2px;
                 background: #00e5ff;
@@ -95,13 +97,20 @@ export component Navbar inherits Rectangle {
                 spacing: 8px;
                 alignment: center;
 
-                ListMusicIcon { size: 18px; colorize: #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
+                ListMusicIcon { size: 18px; colorize: root.active-index == 1 ? #00e5ff : #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
                 Text {
                     text: "Biblioteca";
-                    color: #8f8f9c;
+                    color: root.active-index == 1 ? #00e5ff : #8f8f9c;
                     font-size: 14px;
+                    font-weight: root.active-index == 1 ? 600 : 400;
                     vertical-alignment: center;
                 }
+            }
+
+            if root.active-index == 1: Rectangle {
+                height: 2px;
+                y: parent.height - 2px;
+                background: #00e5ff;
             }
 
             TouchArea {
@@ -121,13 +130,20 @@ export component Navbar inherits Rectangle {
                 spacing: 8px;
                 alignment: center;
 
-                SearchIcon { size: 18px; colorize: #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
+                SearchIcon { size: 18px; colorize: root.active-index == 2 ? #00e5ff : #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
                 Text {
                     text: "Buscar";
-                    color: #8f8f9c;
+                    color: root.active-index == 2 ? #00e5ff : #8f8f9c;
                     font-size: 14px;
+                    font-weight: root.active-index == 2 ? 600 : 400;
                     vertical-alignment: center;
                 }
+            }
+
+            if root.active-index == 2: Rectangle {
+                height: 2px;
+                y: parent.height - 2px;
+                background: #00e5ff;
             }
 
             TouchArea {
@@ -147,13 +163,20 @@ export component Navbar inherits Rectangle {
                 spacing: 8px;
                 alignment: center;
 
-                SettingsIcon { size: 18px; colorize: #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
+                SettingsIcon { size: 18px; colorize: root.active-index == 3 ? #00e5ff : #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
                 Text {
                     text: "Ajustes";
-                    color: #8f8f9c;
+                    color: root.active-index == 3 ? #00e5ff : #8f8f9c;
                     font-size: 14px;
+                    font-weight: root.active-index == 3 ? 600 : 400;
                     vertical-alignment: center;
                 }
+            }
+
+            if root.active-index == 3: Rectangle {
+                height: 2px;
+                y: parent.height - 2px;
+                background: #00e5ff;
             }
 
             TouchArea {

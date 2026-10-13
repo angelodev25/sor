@@ -1,0 +1,123 @@
+import { TrackRow } from "library_row.slint";
+import { LineEdit } from "std-widgets.slint";
+import { FolderOpenIcon, FileAudioIcon } from "@lucide";
+
+export struct TrackEntry {
+    title: string,
+    artist: string,
+    file-name: string,
+    path: string,
+    cover: image,
+    has-cover: bool,
+}
+
+// Vista Biblioteca: explorador de archivos de audio. Rust provee `tracks`
+// escaneando `folder-path`; los callbacks piden reescanear o reproducir.
+export component LibraryView inherits Rectangle {
+    in-out property <[TrackEntry]> tracks;
+    in-out property <string> folder-path: "";
+    in-out property <int> selected-index: -1;
+
+    callback open-folder();
+    callback track-clicked(int);
+
+    background: #10151b;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+
+        // --- Barra tipo explorador: ruta editable + botón cargar ---
+        HorizontalLayout {
+            spacing: 12px;
+            height: 36px;
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                FileAudioIcon {
+                    size: 18px;
+                    colorize: #00e5ff;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Biblioteca";
+                    color: #f5f5fa;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.folder-path;
+                placeholder-text: "Ruta de la carpeta con tu música…";
+                accepted => { root.open-folder(); }
+            }
+
+            Rectangle {
+                width: 150px;
+                border-radius: 8px;
+                background: #1c2230;
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+
+                    FolderOpenIcon {
+                        size: 15px;
+                        colorize: #e8e8ee;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "Abrir carpeta";
+                        color: #e8e8ee;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open-folder(); }
+                }
+            }
+        }
+
+        // --- Lista de archivos ---
+        if root.tracks.length > 0: Flickable {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 4px;
+
+                for item[idx] in root.tracks: TrackRow {
+                    track-title: item.title;
+                    track-artist: item.artist;
+                    file-name: item.file-name;
+                    cover: item.cover;
+                    has-cover: item.has-cover;
+                    is-selected: idx == root.selected-index;
+                    clicked => { root.track-clicked(idx); }
+                }
+            }
+        }
+
+        if root.tracks.length == 0: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+
+            Text {
+                text: "No hay archivos de audio aquí. Escribe una ruta y pulsa Abrir carpeta.";
+                color: #8f8f9c;
+                font-size: 13px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

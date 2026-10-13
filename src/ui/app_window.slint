@@ -1,6 +1,7 @@
 import { Navbar } from "navbar.slint";
 import { Player } from "player.slint";
 import { EqPanel } from "eq_panel.slint";
+import { LibraryView, TrackEntry } from "library.slint";
 
 export component AppWindow inherits Window {
     title: "Sor";
@@ -20,6 +21,14 @@ export component AppWindow inherits Window {
     in-out property <string> duration-label: "00:00";
     in-out property <image> cover;
     in-out property <bool> has-cover: false;
+    // Vista actual según el navbar (0=Reproduciendo, 1=Biblioteca).
+    // shortcut: Buscar/Ajustes aún no tienen vista, muestran Reproduciendo.
+    in-out property <int> current-view: 0;
+
+    // ---- Biblioteca (modelo real desde Rust) ----
+    in-out property <[TrackEntry]> tracks;
+    in-out property <string> folder-path: "";
+    in-out property <int> selected-track: -1;
 
     // ---- Parametros del EQ, expuestos para que Rust los pueda tocar ----
     in-out property <float> eq-low-gain: 0;
@@ -48,17 +57,30 @@ export component AppWindow inherits Window {
     callback eq-changed();
     callback limiter-changed();
     callback output-changed();
+    callback open-folder();
+    callback track-clicked(int);
 
     VerticalLayout {
         // ---------- Navbar ----------
         Navbar {
+            active-index <=> root.current-view;
             nav-changed(idx) => {
-                // Por ahora, sin efecto. En el futuro, cambiara de vista.
+                root.current-view = idx;
             }
         }
 
+        // ---------- Vista Biblioteca ----------
+        if root.current-view == 1: LibraryView {
+            vertical-stretch: 1;
+            tracks <=> root.tracks;
+            folder-path <=> root.folder-path;
+            selected-index <=> root.selected-track;
+            open-folder => { root.open-folder(); }
+            track-clicked(idx) => { root.track-clicked(idx); }
+        }
+
         // ---------- Contenido: Player + EqPanel ----------
-        HorizontalLayout {
+        if root.current-view != 1: HorizontalLayout {
             // El Player toma todo el espacio disponible.
             Player {
                 horizontal-stretch: 1;
