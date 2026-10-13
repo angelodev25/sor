@@ -13,11 +13,26 @@ use ui::AppWindow;
 use crate::audio::{
     engine::AudioEngine,
     eq::ThreeBandEQ,
+    metadata,
     Controls,
     OutputParams,
     EqParams,
     LimiterParams
 };
+
+fn cover_to_image(bytes: &[u8]) -> Option<slint::Image> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgb8();
+    let (w, h) = (img.width(), img.height());
+    // shortcut: carátulas gigantes se reescalan a 512px, ampliar a caché en disco si hace falta.
+    let img = if w.max(h) > 512 {
+        image::imageops::thumbnail(&img, 512, 512)
+    } else {
+        img
+    };
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(img.width(), img.height());
+    buf.make_mut_bytes().copy_from_slice(&img);
+    Some(slint::Image::from_rgb8(buf))
+}
 
 fn main() -> Result<(), Box<dyn StdError>> {
     let ui = AppWindow::new()?;
@@ -135,7 +150,20 @@ fn main() -> Result<(), Box<dyn StdError>> {
             let eq_params_thread = eq_params_ui.clone();
             let limiter_params_thread = limiter_params_ui.clone();
             let output_params_thread = output_params_ui.clone();
-            let path = Path::new("BAD OMENS  Like A Villain (Official Music Video).m4a");
+            let path = Path::new("BAD OMENS  Like A Villain (Official Music Video).m4a").to_path_buf();
+
+            // Lee metadatos en el hilo de UI: es rápido y la UI muestra título/artista al instante.
+            let info = metadata::read_metadata(&path);
+            ui.set_track_title(info.title.clone().into());
+            ui.set_track_artist(info.artist.clone().into());
+            ui.set_duration_label(metadata::fmt_mmss(info.duration_secs).into());
+            ui.set_elapsed_label("00:00".into());
+            ui.set_progress(0.0);
+            match info.cover_bytes.as_deref().and_then(cover_to_image) {
+                Some(img) => { ui.set_cover(img); ui.set_has_cover(true); }
+                None => ui.set_has_cover(false),
+            }
+            controls_ui.reset_progress(info.duration_secs);
 
             thread::spawn(move || {
                 let mut engine = match AudioEngine::new() {
@@ -148,9 +176,10 @@ fn main() -> Result<(), Box<dyn StdError>> {
                 println!("Dispositivo reconocido. Sample rate: {} Hz, {} canales", engine.sample_rate(), engine.channels());
 
                 let eq = ThreeBandEQ::new(engine.sample_rate() as f32, 180.0, 3500.0);
+                let sample_rate = engine.sample_rate();
 
                 if let Err(e) = engine.play(
-                    path, 
+                    &path, 
                     eq, 
                     controls_thread.clone(), 
                     eq_params_thread, 
@@ -170,9 +199,16 @@ fn main() -> Result<(), Box<dyn StdError>> {
                     ui.set_is_playing(true);
                 });
 
-                // Se bloquea el hilo hasta que la cancion termine o el usuario pida salir
+                // Se bloquea el hilo hasta que la cancion termine o el usuario pida salir,
+                // actualizando la barra de progreso por el camino.
                 while !controls_thread.song_ended.load(Ordering::Relaxed) && !controls_thread.quit.load(Ordering::Relaxed) {
-                    thread::sleep(std::time::Duration::from_millis(100));
+                    let (ratio, elapsed) = controls_thread.progress(sample_rate);
+                    let label = metadata::fmt_mmss(elapsed);
+                    let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                        ui.set_progress(ratio);
+                        ui.set_elapsed_label(label.into());
+                    });
+                    thread::sleep(std::time::Duration::from_millis(250));
                 }
 
                 let _ = ui_weak.upgrade_in_event_loop(|ui| {

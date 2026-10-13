@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 // Estado compartido entre la UI y el callback de audio
 pub struct Controls {
@@ -6,6 +6,8 @@ pub struct Controls {
     pub song_ended: AtomicBool,
     pub song_loaded: AtomicBool,
     pub quit: AtomicBool,
+    pub frames_played: AtomicU64,
+    pub duration_secs: AtomicU32,
 }
 
 impl Controls {
@@ -15,7 +17,21 @@ impl Controls {
             song_ended: AtomicBool::new(false),
             song_loaded: AtomicBool::new(false),
             quit: AtomicBool::new(false),
+            frames_played: AtomicU64::new(0),
+            duration_secs: AtomicU32::new(f32::to_bits(0.0)),
         }
+    }
+
+    pub fn reset_progress(&self, duration_secs: f32) {
+        self.frames_played.store(0, Ordering::Relaxed);
+        self.duration_secs.store(f32::to_bits(duration_secs), Ordering::Relaxed);
+    }
+
+    pub fn progress(&self, sample_rate: u32) -> (f32, f32) {
+        let duration = f32::from_bits(self.duration_secs.load(Ordering::Relaxed));
+        let elapsed = self.frames_played.load(Ordering::Relaxed) as f32 / sample_rate.max(1) as f32;
+        let ratio = if duration > 0.0 { (elapsed / duration).clamp(0.0, 1.0) } else { 0.0 };
+        (ratio, elapsed)
     }
 }
 

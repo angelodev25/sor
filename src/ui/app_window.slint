@@ -12,8 +12,14 @@ export component AppWindow inherits Window {
 
     // ---- Estado global (lo que Rust controla directamente) ----
     in-out property <string> track-title: "Sin pista cargada";
+    in-out property <string> track-artist: "Artista desconocido";
     in-out property <bool> is-playing: false;
     in-out property <bool> is-loading: false;
+    in-out property <float> progress: 0;
+    in-out property <string> elapsed-label: "00:00";
+    in-out property <string> duration-label: "00:00";
+    in-out property <image> cover;
+    in-out property <bool> has-cover: false;
 
     // ---- Parametros del EQ, expuestos para que Rust los pueda tocar ----
     in-out property <float> eq-low-gain: 0;
@@ -57,8 +63,14 @@ export component AppWindow inherits Window {
             Player {
                 horizontal-stretch: 1;
                 track-title <=> root.track-title;
+                track-artist <=> root.track-artist;
                 is-playing  <=> root.is-playing;
                 is-loading  <=> root.is-loading;
+                progress <=> root.progress;
+                elapsed-label <=> root.elapsed-label;
+                duration-label <=> root.duration-label;
+                cover <=> root.cover;
+                has-cover <=> root.has-cover;
                 play-pause => { root.play-pause(); }
             }
 

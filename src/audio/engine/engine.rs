@@ -172,6 +172,7 @@ impl AudioEngine {
 
                 // data viene como [L, R, L, R, ...] para estereo
                 let frames = data.len() / channels;
+                let mut consumed: u64 = 0;
 
                 for frame in 0..frames {
                     let base = frame * channels;
@@ -194,6 +195,7 @@ impl AudioEngine {
 
                     let l = consumer.pop().unwrap();
                     let r = consumer.pop().unwrap();
+                    consumed += 1;
 
                     // Cadena de DSP
                     
@@ -209,6 +211,9 @@ impl AudioEngine {
                     // Volumen final.
                     data[base] = l * volume;
                     data[base + 1] = r * volume;
+                }
+                if consumed > 0 {
+                    cb_controls.frames_played.fetch_add(consumed, Ordering::Relaxed);
                 }
             },
             |err| eprintln!("Error en el stream de audio: {}", err),

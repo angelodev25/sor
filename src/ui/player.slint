@@ -34,6 +34,10 @@ export component Player inherits Rectangle {
     in-out property <bool> is-playing: false;
     in-out property <bool> is-loading: false;
     in-out property <float> progress: 0;
+    in-out property <string> elapsed-label: "00:00";
+    in-out property <string> duration-label: "00:00";
+    in-out property <image> cover;
+    in-out property <bool> has-cover: false;
 
     callback play-pause();
 
@@ -55,9 +59,15 @@ export component Player inherits Rectangle {
                 background: @linear-gradient(135deg, #1a2029, #2d3748);
                 border-width: 1px;
                 border-color: #ffffff12;
+                clip: true;
 
-                // Centra el icono en ambos ejes.
-                VerticalLayout {
+                if root.has-cover: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.cover;
+                }
+
+                if !root.has-cover: VerticalLayout {
                     alignment: center;
 
                     HorizontalLayout {
@@ -99,9 +109,9 @@ export component Player inherits Rectangle {
             alignment: center;
 
             // Slint no tiene operador `%` para aritmetica: `%` esta
-            // reservado para unidades. El modulo se hace con Math.mod.
+            // reservado para unidades. Los textos los calcula Rust.
             Text {
-                text: "\{Math.floor(root.progress * 225 / 60)}:\{Math.mod(Math.floor(root.progress * 225), 60)}";
+                text: root.elapsed-label;
                 color: #8f8f9c;
                 font-size: 11px;
                 vertical-alignment: center;
@@ -119,7 +129,7 @@ export component Player inherits Rectangle {
             }
 
             Text {
-                text: "03:45";
+                text: root.duration-label;
                 color: #8f8f9c;
                 font-size: 11px;
                 vertical-alignment: center;
