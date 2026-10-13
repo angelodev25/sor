@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::thread;
 
 use crate::audio::{
@@ -70,6 +71,10 @@ pub struct PlaybackCtx {
     pub limiter_params: Arc<LimiterParams>,
     pub output_params: Arc<OutputParams>,
     pub generation: Arc<AtomicU64>,
+    // Serializa los motores: el hilo nuevo no abre su stream hasta que el
+    // anterior soltó el dispositivo. Sin esto, dos streams concurrentes en
+    // el cambio de pista hacen fallar el arranque y hay que pulsar dos veces.
+    pub engine_lock: Arc<Mutex<()>>,
 }
 
 // Arranca la reproducción en un hilo. `play_id` invalida hilos anteriores:
@@ -78,6 +83,14 @@ pub struct PlaybackCtx {
 fn spawn_playback(path: PathBuf, ui_weak: slint::Weak<AppWindow>, ctx: PlaybackCtx, play_id: u64) {
     thread::spawn(move || {
         let current = || ctx.generation.load(Ordering::Relaxed) == play_id;
+        if !current() {
+            return;
+        }
+        // Espera (sin bloquear la UI) a que el motor anterior muera del todo.
+        let _guard = ctx.engine_lock.lock().unwrap_or_else(|e| e.into_inner());
+        if !current() {
+            return;
+        }
         let mut engine = match AudioEngine::new() {
             Ok(e) => e,
             Err(e) => {

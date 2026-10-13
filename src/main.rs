@@ -2,6 +2,7 @@ use std::error::Error as StdError;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 mod audio;
 mod playback;
@@ -111,6 +112,7 @@ fn main() -> Result<(), Box<dyn StdError>> {
         limiter_params: limiter_params.clone(),
         output_params: output_params.clone(),
         generation: Arc::new(AtomicU64::new(0)),
+        engine_lock: Arc::new(Mutex::new(())),
     };
 
     // Biblioteca inicial: carpeta actual.
