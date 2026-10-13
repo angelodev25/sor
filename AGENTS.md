@@ -1,0 +1,42 @@
+# AGENTS.md — Sor
+
+Rust music player: custom DSP engine (`cpal` callback) + `ffmpeg` subprocess decoding + Slint UI. See `README.md` for DSP chain values and roadmap.
+
+## Commands
+
+- Run: `cargo run` — ONLY way. `make run` / `SLINT_BACKEND=winit-software` panics, do not use.
+- Check: `cargo check` / `cargo clippy`; no tests exist, no CI. Verify with `cargo check` + `cargo run`.
+- Deps (Debian/Ubuntu): `sudo apt install ffmpeg libasound2-dev pkg-config make`. Runtime requires `ffmpeg` in `PATH` and a stereo `f32` ALSA device (engine errors out otherwise).
+- Linker is `mold` via `.cargo/config.toml`; if link fails, `sudo apt install mold` or override `RUSTFLAGS`.
+
+## Architecture
+
+- `src/main.rs` — entrypoint only: shared state, initial EQ preset synced to UI, Slint callbacks (`eq-changed`, `limiter-changed`, `output-changed`, `open-folder`, `track-clicked`, `play-pause`).
+- `src/playback.rs` — UI↔engine bridge. `spawn_engine` creates the manager thread + persistent stream; `start_track` sends `PlayTrack{path,track_id}` over a channel and spawns the 250 ms progress thread; `track_entries`/`show_track_info` map disk → Slint rows and metadata → Player.
+- `src/audio/engine/engine.rs` — `AudioEngine` lives on its own manager thread (`cpal::Stream` is not `Send`). `start()` opens the stream ONCE per session; `play_track()` only swaps the data source. Requires stereo (`channels == 2` errors otherwise), ~25 ms buffer rounded to pow2 (min 512).
+- `src/audio/source.rs` — `AudioSource`: `Mutex<Option<Consumer<f32>>>` socket the callback always reads; `None` between tracks = silence, stream never restarts.
+- `src/audio/loader/streamer.rs` — `spawn_streamer`: `ffmpeg -f f32le pcm_f32le -ar <fs> -ac <ch> pipe:1` → reader thread → `rtrb` ringbuffer (3 s). At EOF the reader waits for the callback to drain the ring before signalling end. `Drop` kills ffmpeg + joins the thread.
+- `src/audio/library.rs` — `scan_folder`: NON-recursive scan, 11 extensions (mp3 m4a flac ogg oga opus wav aac wma aiff aif), sorted by `file_name`.
+- `src/audio/metadata.rs` — `read_metadata` via `lofty` (title/artist/duration/first picture); fallbacks "Pista desconocida"/"Artista desconocido". Progress = `frames_played` counted in the callback vs `duration_secs`.
+- `src/audio/controls.rs` — all UI→audio state is atomics (`Controls`, `EqParams`, `LimiterParams`, `OutputParams`). Never add locks in the `cpal` callback; never allocate there. `current_track: AtomicU64` + `generation` counter invalidate stale readers/progress threads; `dsp_reset` rebuilds the DSP chain virgin on track change (old reverb tail sounded like a low-mid thump otherwise).
+- `src/audio/eq/three_band.rs`, `compressor.rs`, `soft_clip.rs`, `engine/limiter.rs` — DSP: HPF 20 Hz → LR4 crossover (180/3500 Hz) → per-band comp+EQ → master gain → tanh soft-clip (ceiling 0.98) → lookahead limiter → volume. Biquads rebuild only on value change (cache compare in `engine.rs`) — keep that pattern.
+- `src/ui/*.slint` — `app_window.slint` is root (`Navbar + (Player | EqPanel | Library)`), compiled by `build.rs` with `slint-build` + `lucide` icon library.
+
+## Gotchas
+
+- Track switching is fully serialized in the manager thread — no mutex needed; don't reintroduce one (commit `98c4f1c`'s mutex is gone since `b17d3a4`).
+- `is_loading` / `song_loaded` / `song_ended` guards in `main.rs`/`playback.rs` prevent double-start and stale-end signalling; natural end rewinds to 00:00, pauses, and marks unloaded so next play restarts from zero.
+- Slint/Lucide rendering: `MusicIcon` never rasterizes under FemtoVG+MESA (only in Slint preview) — placeholder uses `HeadphonesIcon` (`5344ec0`). Lucide icons ignore `vertical-alignment`; centering uses the navbar wrapper trick.
+- `cover_to_image` downscales covers >512 px (`playback.rs`, marked `shortcut:` — add disk cache if this gets slow).
+- `profile.dev` sets `opt-level = 1` (top) / `3` (deps) — builds are slow; prefer `cargo check` for iteration.
+- No test harness, no lint config, no CI. Do not add one unasked.
+
+## Skills (`.agents/skills/*/SKILL.md`, locked in `skills-lock.json`)
+
+Load via the `skill` tool when the task matches; don't guess workflows.
+
+- Routine default: `using-agent-skills` (pick the right skill), `test-driven-development` (any logic/bugfix), `debugging-and-error-recovery` (failures), `code-review-and-quality` (before merge).
+- Plan/shape work: `spec-driven-development` (new feature, e.g. seek/presets), `planning-and-task-breakdown`, `incremental-implementation`, `idea-refine` / `interview-me` (vague asks).
+- Code quality: `code-simplification` (refactor), `performance-optimization` (DSP/callback hot path — profile, keep no-alloc), `api-and-interface-design` (module boundaries, e.g. library/metadata APIs).
+- UI: `frontend-ui-engineering` (any `src/ui/*.slint` work), `browser-testing-with-devtools` does NOT apply (no browser here).
+- Ops/care: `security-and-hardening` (file paths, subprocess args, untrusted tags), `observability-and-instrumentation`, `shipping-and-launch`, `ci-cd-and-automation`, `git-workflow-and-versioning`, `deprecation-and-migration`, `documentation-and-adrs`, `source-driven-development` (verify Slint/cpal API in docs before coding), `constraint-driven-development`, `context-engineering`, `doubt-driven-development`.
