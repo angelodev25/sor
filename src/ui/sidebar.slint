@@ -1,4 +1,5 @@
-import { HeadphonesIcon, ListMusicIcon, SearchIcon, SettingsIcon } from "@lucide";
+import { ListMusicIcon, SearchIcon, SettingsIcon } from "@lucide";
+import { SorLogo } from "logo.slint";
 
 // Barra lateral de solo iconos para el modo ancho. Buscar/Ajustes son
 // placeholder: solo cambian el resaltado, sin vista propia todavía.
@@ -10,10 +11,15 @@ component SideItem inherits Rectangle {
     height: 52px;
     background: transparent;
 
-    if root.active == root.idx: Rectangle {
-        width: 2px;
-        background: #00e5ff;
+    HorizontalLayout {
+        alignment: end;
+        padding-right: 2px;
+        if root.active == root.idx: Rectangle {
+            width: 2px;
+            background: #00e5ff;
+        }
     }
+
 
     HorizontalLayout {
         alignment: center;
@@ -29,7 +35,7 @@ component SideItem inherits Rectangle {
 export component Sidebar inherits Rectangle {
     // Mismo índice que el Navbar (0=Reproduciendo, 1=Biblioteca, 2=Buscar, 3=Ajustes).
     callback nav-changed(int);
-    in-out property <int> active-index: 0;
+    in-out property <int> active-index: 1;
 
     width: 64px;
     background: #0a0d12;
@@ -45,13 +51,9 @@ export component Sidebar inherits Rectangle {
         spacing: 4px;
         alignment: start;
 
-        SideItem {
-            idx: 0;
-            active: root.active-index;
-            picked(i) => { root.nav-changed(i); }
-            HeadphonesIcon { size: 20px; colorize: root.active-index == 0 ? #00e5ff : #8f8f9c; vertical-alignment: center; y: (parent.height - self.height) / 2; }
-        }
+        SorLogo {}
 
+        // Sin item de Reproducción: en modo ancho siempre está visible.
         SideItem {
             idx: 1;
             active: root.active-index;

@@ -108,8 +108,8 @@ export component AppWindow inherits Window {
             // (altura automática del HorizontalLayout); sus grupos van
             // centrados (ver eq_panel.slint).
             EqPanel {
-                min-width: 200px;
-                max-width: 200px;
+                min-width: 250px;
+                max-width: 300px;
                 horizontal-stretch: 0;
 
                 low-gain       <=> root.eq-low-gain;
@@ -157,6 +157,12 @@ export component AppWindow inherits Window {
             selected-index <=> root.selected-track;
             open-folder => { root.open-folder(); }
             track-clicked(idx) => { root.track-clicked(idx); }
+        }
+
+        // Línea que separa el bloque izquierdo (biblioteca) del derecho.
+        Rectangle {
+            width: 1px;
+            background: #ffffff14;
         }
 
         NowPlaying {

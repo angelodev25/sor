@@ -48,15 +48,15 @@ export component Player inherits Rectangle {
     VerticalLayout {
         alignment: center;
         spacing: root.compact ? 8px : 18px;
-        padding: root.compact ? 12px : 32px;
+        padding: root.compact ? 6px : 32px;
 
         // --- Caratula centrada horizontalmente ---
         HorizontalLayout {
             alignment: center;
 
             Rectangle {
-                width: root.compact ? 140px : 260px;
-                height: root.compact ? 140px : 260px;
+                width: root.compact ? 160px : 260px;
+                height: root.compact ? 160px : 260px;
                 border-radius: 20px;
                 background: @linear-gradient(135deg, #1a2029, #2d3748);
                 border-width: 1px;
@@ -76,7 +76,7 @@ export component Player inherits Rectangle {
                         alignment: center;
 
                         HeadphonesIcon {
-                            size: root.compact ? 56px : 90px;
+                            size: root.compact ? 48px : 90px;
                             colorize: #ffffff50;
                         }
                     }
@@ -123,7 +123,7 @@ export component Player inherits Rectangle {
             // `progress` al arrastrarlo, y `progress` mueve el slider
             // cuando se cambia desde fuera.
             Slider {
-                min-width: 300px;
+                min-width: 220px;
                 horizontal-stretch: 1;
                 minimum: 0;
                 maximum: 1;
@@ -141,7 +141,7 @@ export component Player inherits Rectangle {
         
         // --- Controles ---
         HorizontalLayout {
-            spacing: 16px;
+            spacing: 15px;
             alignment: center;
             height: 58px;
 

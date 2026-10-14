@@ -1,4 +1,5 @@
 import { MusicIcon, ListMusicIcon, SearchIcon, SettingsIcon } from "@lucide";
+import { SorLogo } from "logo.slint";
 
 export component Navbar inherits Rectangle {
     // Callback que se dispara cuando el usuario clickea un item.
@@ -22,33 +23,9 @@ export component Navbar inherits Rectangle {
         padding-right: 24px;
         spacing: 4px;
 
-        // Marca: isotipo neon + wordmark con jerarquia visual.
         HorizontalLayout {
-            spacing: 9px;
             alignment: start;
-            padding-right: 20px;
-
-            VerticalLayout {
-                alignment: center;
-                spacing: 0px;
-
-                Text {
-                    text: "Sor";
-                    color: #e5e5f9;
-                    font-size: 21px;
-                    font-weight: 800;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    text: "A U D I O";
-                    color: #00bcd4;
-                    font-size: 7px;
-                    font-weight: 700;
-                    letter-spacing: 1px;
-                    vertical-alignment: center;
-                }
-            }
+            SorLogo {}
         }
 
         // --- Item 1: Reproduciendo (ACTIVO) ---

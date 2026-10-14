@@ -9,7 +9,8 @@ component RightTab inherits Rectangle {
     background: transparent;
 
     HorizontalLayout {
-        spacing: 4px;
+        spacing: 6px;
+        padding-top: 8px;
         alignment: center;
 
         Rectangle {
@@ -103,6 +104,8 @@ export component NowPlaying inherits Rectangle {
     background: #10151b;
 
     if root.show-both: VerticalLayout {
+        // Sin spacing: el Player mide justo su contenido y el EQ toma el resto.
+        spacing: 0;
         Player {
             compact: true;
             track-title <=> root.track-title;
@@ -118,7 +121,7 @@ export component NowPlaying inherits Rectangle {
         }
 
         EqPanel {
-            vertical-stretch: 1;
+            vertical-stretch: 10;
             niveles-side: true;
             low-gain <=> root.low-gain;
             low-shelf <=> root.low-shelf;
@@ -142,12 +145,14 @@ export component NowPlaying inherits Rectangle {
     }
 
     if !root.show-both: VerticalLayout {
+        spacing: 0;
         RightTab {
             tab <=> root.tab;
         }
 
+        // Sin stretch: la vista queda arriba y el sobrante abajo, no
+        // repartido alrededor del contenido.
         if root.tab == 0: Player {
-            vertical-stretch: 1;
             compact: true;
             track-title <=> root.track-title;
             track-artist <=> root.track-artist;
