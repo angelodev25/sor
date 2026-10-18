@@ -17,12 +17,12 @@ use crate::audio::{
 };
 use crate::ui::{AppWindow, TrackEntry};
 
-pub fn cover_to_image(bytes: &[u8]) -> Option<slint::Image> {
+// `max`: lado máximo en px de la imagen resultante.
+pub fn cover_to_image(bytes: &[u8], max: u32) -> Option<slint::Image> {
     let img = image::load_from_memory(bytes).ok()?.to_rgb8();
-    let (w, h) = (img.width(), img.height());
-    // shortcut: carátulas gigantes se reescalan a 512px, ampliar a caché en disco si hace falta.
-    let img = if w.max(h) > 512 {
-        image::imageops::thumbnail(&img, 512, 512)
+    // shortcut: carátulas gigantes se reescalan, ampliar a caché en disco si hace falta.
+    let img = if img.width().max(img.height()) > max {
+        image::imageops::thumbnail(&img, max, max)
     } else {
         img
     };
@@ -31,24 +31,59 @@ pub fn cover_to_image(bytes: &[u8]) -> Option<slint::Image> {
     Some(slint::Image::from_rgb8(buf))
 }
 
+// Miniatura cuadrada con las esquinas redondeadas horneadas en el alpha.
+// El renderer software no soporta `border-radius` + `clip`, así que la
+// redondez va dentro de la imagen y el blit por fila es directo (sin escalar).
+fn cover_to_thumb(bytes: &[u8], size: u32, radius: u32) -> Option<slint::Image> {
+    let src = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let mut img = image::imageops::resize(&src, size, size, image::imageops::FilterType::Triangle);
+
+    let r = radius as f32;
+    let last = size.saturating_sub(1) as f32;
+    // Solo esquinas: redondea el alpha fuera del círculo de cada esquina.
+    for y in 0..size {
+        let cy = if (y as f32) < r { r }
+            else if (y as f32) > last - r { last - r }
+            else { continue };
+        for x in 0..size {
+            let cx = if (x as f32) < r { r }
+                else if (x as f32) > last - r { last - r }
+                else { continue };
+            let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+            let px = img.get_pixel_mut(x, y);
+            if d >= r {
+                px.0[3] = 0;
+            } else if d > r - 1.0 {
+                px.0[3] = (((r - d) * 255.0) as u8).min(px.0[3]);
+            }
+        }
+    }
+
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(size, size);
+    buf.make_mut_bytes().copy_from_slice(&img);
+    Some(slint::Image::from_rgba8(buf))
+}
+
 // Escanea la carpeta y la deja lista para `ui.set_tracks`.
 pub fn track_entries(dir: &Path) -> Vec<TrackEntry> {
-    library::scan_folder(dir)
-        .iter()
-        .map(|t| {
-            let (cover, has_cover) = t.cover_bytes.as_deref().and_then(cover_to_image)
-                .map(|img| (img, true))
-                .unwrap_or_default();
-            TrackEntry {
-                title: t.title.clone().into(),
-                artist: t.artist.clone().into(),
-                file_name: t.file_name.clone().into(),
-                path: t.path.to_string_lossy().into_owned().into(),
-                cover,
-                has_cover,
-            }
-        })
-        .collect()
+    let mut entries = Vec::new();
+    library::scan_folder(dir, |t| {
+        // Las filas muestran la carátula a 48px: decodificarla a tamaño
+        // completo aquí gastaba ~800KB de RAM por pista. 8px de radio =
+        // `border-radius` de la fila, horneado en el alpha.
+        let (cover, has_cover) = t.cover_bytes.as_deref().and_then(|b| cover_to_thumb(b, 48, 8))
+            .map(|img| (img, true))
+            .unwrap_or_default();
+        entries.push(TrackEntry {
+            title: t.title.into(),
+            artist: t.artist.into(),
+            file_name: t.file_name.into(),
+            path: t.path.to_string_lossy().into_owned().into(),
+            cover,
+            has_cover,
+        });
+    });
+    entries
 }
 
 // Muestra los metadatos de una pista en el Player. Devuelve la duración.
@@ -59,7 +94,7 @@ fn show_track_info(ui: &AppWindow, path: &Path) -> f32 {
     ui.set_duration_label(metadata::fmt_mmss(info.duration_secs).into());
     ui.set_elapsed_label("00:00".into());
     ui.set_progress(0.0);
-    match info.cover_bytes.as_deref().and_then(cover_to_image) {
+    match info.cover_bytes.as_deref().and_then(|b| cover_to_image(b, 512)) {
         Some(img) => { ui.set_cover(img); ui.set_has_cover(true); }
         None => ui.set_has_cover(false),
     }
@@ -139,16 +174,22 @@ fn spawn_progress(ui_weak: slint::Weak<AppWindow>, ctx: PlaybackCtx, play_id: u6
 
         // Actualiza la barra hasta que la cancion termine, la sustituya otra
         // pista o el usuario pida salir.
+        let mut last_label = String::new();
         while current()
             && !ctx.controls.song_ended.load(Ordering::Relaxed)
             && !ctx.controls.quit.load(Ordering::Relaxed)
         {
             let (ratio, elapsed) = ctx.controls.progress(ctx.sample_rate);
             let label = metadata::fmt_mmss(elapsed);
-            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
-                ui.set_progress(ratio);
-                ui.set_elapsed_label(label.into());
-            });
+            // Solo toca la UI cuando el segundo cambió: cada set repinta la
+            // vista de reproducción (~30% CPU a 4 Hz en software).
+            if label != last_label {
+                last_label = label.clone();
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    ui.set_progress(ratio);
+                    ui.set_elapsed_label(label.into());
+                });
+            }
             thread::sleep(std::time::Duration::from_millis(250));
         }
 

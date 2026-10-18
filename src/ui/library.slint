@@ -1,6 +1,6 @@
 import { TrackEntry } from "models.slint";
 import { TrackRow } from "library_row.slint";
-import { LineEdit } from "std-widgets.slint";
+import { LineEdit, ListView } from "std-widgets.slint";
 import { FolderOpenIcon, FileAudioIcon } from "@lucide";
 
 // Vista Biblioteca: explorador de archivos de audio. Rust provee `tracks`
@@ -83,21 +83,19 @@ export component LibraryView inherits Rectangle {
         }
 
         // --- Lista de archivos ---
-        if root.tracks.length > 0: Flickable {
+        // ListView virtualiza: solo instancia las filas visibles. Con Flickable
+        // + `for` se creaban las ~300 filas de golpe (scroll y RAM disparados).
+        if root.tracks.length > 0: ListView {
             vertical-stretch: 1;
 
-            VerticalLayout {
-                spacing: 4px;
-
-                for item[idx] in root.tracks: TrackRow {
-                    track-title: item.title;
-                    track-artist: item.artist;
-                    file-name: item.file-name;
-                    cover: item.cover;
-                    has-cover: item.has-cover;
-                    is-selected: idx == root.selected-index;
-                    clicked => { root.track-clicked(idx); }
-                }
+            for item[idx] in root.tracks: TrackRow {
+                track-title: item.title;
+                track-artist: item.artist;
+                file-name: item.file-name;
+                cover: item.cover;
+                has-cover: item.has-cover;
+                is-selected: idx == root.selected-index;
+                clicked => { root.track-clicked(idx); }
             }
         }
 

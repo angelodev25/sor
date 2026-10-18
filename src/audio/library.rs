@@ -20,17 +20,20 @@ fn is_audio_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-// Escanea una carpeta (no recursivo), un archivo de audio por entrada.
-pub fn scan_folder(dir: &Path) -> Vec<LibraryTrack> {
-    let mut tracks = Vec::new();
-    let Ok(read_dir) = std::fs::read_dir(dir) else { return tracks; };
-    for entry in read_dir.flatten() {
-        let path = entry.path();
-        if !path.is_file() || !is_audio_file(&path) {
-            continue;
-        }
+// Escanea una carpeta (no recursivo) y entrega cada pista ya ordenada por
+// nombre de archivo. Callback en vez de Vec: retener las carátulas de todas
+// las pistas a la vez eran cientos de MB de pico de RAM.
+pub fn scan_folder(dir: &Path, mut on_track: impl FnMut(LibraryTrack)) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else { return; };
+    let mut files: Vec<PathBuf> = read_dir
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_audio_file(p))
+        .collect();
+    files.sort_by_key(|p| p.file_name().unwrap_or_default().to_os_string());
+    for path in files {
         let info = metadata::read_metadata(&path);
-        tracks.push(LibraryTrack {
+        on_track(LibraryTrack {
             title: info.title,
             artist: info.artist,
             file_name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
@@ -38,6 +41,4 @@ pub fn scan_folder(dir: &Path) -> Vec<LibraryTrack> {
             cover_bytes: info.cover_bytes,
         });
     }
-    tracks.sort_by(|a, b| a.file_name.cmp(&b.file_name));
-    tracks
 }

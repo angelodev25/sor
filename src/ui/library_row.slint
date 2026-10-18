@@ -12,61 +12,79 @@ export component TrackRow inherits Rectangle {
 
     callback clicked();
 
-    height: 64px;
-    border-radius: 10px;
-    background: root.is-selected ? #1c2230 : transparent;
+    // 68px con la tarjeta a 64px: deja 2px de aire arriba/abajo (ListView
+    // no tiene `spacing`).
+    height: 68px;
+    background: transparent;
+    // Cachea la fila en una capa: durante el scroll solo cambia de posición,
+    // así el renderer blita lo ya pintado en vez de re-rasterizar la fila.
+    cache-rendering-hint: true;
 
-    HorizontalLayout {
-        padding: 8px;
-        spacing: 12px;
+    Rectangle {
+        x: 0;
+        y: 2px;
+        width: parent.width;
+        height: parent.height - 4px;
+        border-radius: 10px;
+        background: root.is-selected ? #1c2230 : transparent;
 
-        // --- Carátula ---
-        Rectangle {
-            width: 48px;
-            height: 48px;
-            border-radius: 8px;
-            background: @linear-gradient(135deg, #1a2029, #2d3748);
-            clip: true;
+        HorizontalLayout {
+            padding: 8px;
+            spacing: 12px;
 
-            if root.has-cover: Image {
-                width: 100%;
-                height: 100%;
-                source: root.cover;
-            }
+            // --- Carátula ---
+            Rectangle {
+                width: 48px;
+                height: 48px;
+                // El radio solo hace falta en el hueco sin portada; con portada
+                // las esquinas ya vienen redondeadas en la miniatura (alpha).
+                border-radius: root.has-cover ? 0px : 8px;
+                // El gradiente solo si no hay portada: pintarlo bajo la imagen
+                // era overdraw en cada fila visible y en cada frame de scroll.
+                background: root.has-cover
+                    ? transparent
+                    : @linear-gradient(135deg, #1a2029, #2d3748);
 
-            if !root.has-cover: VerticalLayout {
-                alignment: center;
+                if root.has-cover: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.cover;
+                }
 
-                HorizontalLayout {
+                if !root.has-cover: VerticalLayout {
                     alignment: center;
 
-                    HeadphonesIcon {
-                        size: 22px;
-                        colorize: #ffffff50;
+                    HorizontalLayout {
+                        alignment: center;
+
+                        HeadphonesIcon {
+                            size: 22px;
+                            colorize: #ffffff50;
+                        }
                     }
                 }
             }
-        }
 
-        // --- Textos ---
-        VerticalLayout {
-            alignment: center;
-            spacing: 3px;
+            // --- Textos ---
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
 
-            Text {
-                text: root.track-title + " - " + root.track-artist;
-                color: #f5f5fa;
-                font-size: 14px;
-                font-weight: 700;
-                overflow: elide;
-            }
+                Text {
+                    text: root.track-title + " - " + root.track-artist;
+                    color: #f5f5fa;
+                    font-size: 14px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
 
-            Text {
-                text: root.file-name;
-                color: #8f8f9c;
-                font-size: 11px;
-                font-weight: 300;
-                overflow: elide;
+                Text {
+                    text: root.file-name;
+                    color: #8f8f9c;
+                    font-size: 11px;
+                    font-weight: 300;
+                    overflow: elide;
+                }
             }
         }
     }
