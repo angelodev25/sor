@@ -4,7 +4,8 @@ Rust music player: custom DSP engine (`cpal` callback) + `ffmpeg` subprocess dec
 
 ## Commands
 
-- Run: `cargo run` — ONLY way. `make run` / `SLINT_BACKEND=winit-software` panics, do not use.
+- Run: `cargo run` — ONLY way. `make run` panics, do not use.
+- Backend: `winit-software` (renderer software) is set **in code** in `main.rs` via `slint::BackendSelector`. Override with `SLINT_BACKEND=...` in the environment. Do not use FemtoVG/OpenGL on old GPUs: i915 (G33) runs the GLSL shaders on the CPU.
 - Check: `cargo check` / `cargo clippy`; no tests exist, no CI. Verify with `cargo check` + `cargo run`.
 - Deps (Debian/Ubuntu): `sudo apt install ffmpeg libasound2-dev pkg-config make`. Runtime requires `ffmpeg` in `PATH` and a stereo `f32` ALSA device (engine errors out otherwise).
 - Linker is `mold` via `.cargo/config.toml`; if link fails, `sudo apt install mold` or override `RUSTFLAGS`.
@@ -30,6 +31,19 @@ Rust music player: custom DSP engine (`cpal` callback) + `ffmpeg` subprocess dec
 - `cover_to_image` downscales covers >512 px (`playback.rs`, marked `shortcut:` — add disk cache if this gets slow).
 - `profile.dev` sets `opt-level = 1` (top) / `3` (deps) — builds are slow; prefer `cargo check` for iteration.
 - No test harness, no lint config, no CI. Do not add one unasked.
+
+### Renderer software (Slint 1.17)
+
+- No soporta `border-radius` + `clip: true` (se ve cuadrado) y los `@linear-gradient` **ignoran** `border-radius`. Por eso las carátulas traen el redondeo horneado en el alpha (`round_corners` en `playback.rs`) y el hueco sin portada se pinta en Rust (`placeholder_cover`).
+- `cache-rendering-hint` no existe en el renderer software: inerte, no lo pongas.
+- Los elementos **repetidos** (`for`) no reciben geometría por defecto: hay que darles `width`/`height`/`y` explícitos si su padre no es un layout. Por eso las filas de la biblioteca los posiciona a mano (`y: idx * 68px`).
+- `id` no existe en los builtins (Rectangle, Flickable, Timer), solo en componentes propios.
+- Un `TouchArea` **siempre** se queda con el ratón al pulsar (`GrabMouse`), tenga o no callback `pointer-event`: no sirve de overlay transparente.
+- El `Flickable`/`ListView` de std-widgets anima la rueda 180 ms a 60 Hz (≈11 frames por muesca) y repinta el viewport entero: en un core lento satura la CPU. La biblioteca usa su propio motor (`scroll-fps` / `scroll-step-px` en `library.slint`).
+
+### Rendimiento
+
+- `perf` con eventos hardware no funciona en el equipo del usuario; usar `perf record -e cpu-clock` (evento software) y `perf report --sort=dso`. Recetas en `debug-profiling.txt` (build con símbolos: `--config 'profile.release.debug=1' --config 'profile.release.strip="none"'`).
 
 ## Skills (`.agents/skills/*/SKILL.md`, locked in `skills-lock.json`)
 

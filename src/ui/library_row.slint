@@ -5,20 +5,18 @@ import { HeadphonesIcon } from "@lucide";
 export component TrackRow inherits Rectangle {
     in property <string> track-title: "Título";
     in property <string> track-artist: "Artista";
-    in property <string> file-name: "archivo.mp3";
     in property <image> cover;
     in property <bool> has-cover: false;
     in property <bool> is-selected: false;
 
     callback clicked();
+    // Rueda: `dy` positivo = bajar la lista.
+    callback scroll-down(dy: length);
 
     // 68px con la tarjeta a 64px: deja 2px de aire arriba/abajo (ListView
     // no tiene `spacing`).
     height: 68px;
     background: transparent;
-    // Cachea la fila en una capa: durante el scroll solo cambia de posición,
-    // así el renderer blita lo ya pintado en vez de re-rasterizar la fila.
-    cache-rendering-hint: true;
 
     Rectangle {
         x: 0;
@@ -36,8 +34,8 @@ export component TrackRow inherits Rectangle {
             Rectangle {
                 width: 48px;
                 height: 48px;
-                // El radio solo hace falta en el hueco sin portada; con portada
-                // las esquinas ya vienen redondeadas en la miniatura (alpha).
+                // A/B: la miniatura va sin alpha (diagnóstico), así que sale
+                // cuadrada. El radio solo aplica al hueco sin portada.
                 border-radius: root.has-cover ? 0px : 8px;
                 // El gradiente solo si no hay portada: pintarlo bajo la imagen
                 // era overdraw en cada fila visible y en cada frame de scroll.
@@ -71,7 +69,7 @@ export component TrackRow inherits Rectangle {
                 spacing: 3px;
 
                 Text {
-                    text: root.track-title + " - " + root.track-artist;
+                    text: root.track-title;
                     color: #f5f5fa;
                     font-size: 14px;
                     font-weight: 700;
@@ -79,10 +77,10 @@ export component TrackRow inherits Rectangle {
                 }
 
                 Text {
-                    text: root.file-name;
-                    color: #8f8f9c;
-                    font-size: 11px;
-                    font-weight: 300;
+                    text: root.track-artist;
+                    color: #aab3c0;
+                    font-size: 13px;
+                    font-weight: 500;
                     overflow: elide;
                 }
             }
@@ -92,5 +90,11 @@ export component TrackRow inherits Rectangle {
     TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        // La rueda la lleva la propia fila: un TouchArea encima se quedaría
+        // con el ratón (hace GrabMouse) y los clicks de las filas no llegarían.
+        scroll-event(event) => {
+            root.scroll-down(-event.delta-y);
+            return accept;
+        }
     }
 }

@@ -17,51 +17,69 @@ use crate::audio::{
 };
 use crate::ui::{AppWindow, TrackEntry};
 
-// `max`: lado máximo en px de la imagen resultante.
-pub fn cover_to_image(bytes: &[u8], max: u32) -> Option<slint::Image> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgb8();
-    // shortcut: carátulas gigantes se reescalan, ampliar a caché en disco si hace falta.
-    let img = if img.width().max(img.height()) > max {
-        image::imageops::thumbnail(&img, max, max)
-    } else {
-        img
-    };
-    let mut buf = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(img.width(), img.height());
-    buf.make_mut_bytes().copy_from_slice(&img);
-    Some(slint::Image::from_rgb8(buf))
-}
-
-// Miniatura cuadrada con las esquinas redondeadas horneadas en el alpha.
-// El renderer software no soporta `border-radius` + `clip`, así que la
-// redondez va dentro de la imagen y el blit por fila es directo (sin escalar).
-fn cover_to_thumb(bytes: &[u8], size: u32, radius: u32) -> Option<slint::Image> {
-    let src = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let mut img = image::imageops::resize(&src, size, size, image::imageops::FilterType::Triangle);
-
+// Hornea las 4 esquinas (radio `radius`) en el alpha con supersampling 4x4:
+// el renderer software no soporta `border-radius` + `clip`.
+fn round_corners(img: &mut image::RgbaImage, radius: u32) {
+    let (w, h) = (img.width(), img.height());
+    let (lx, ly) = (w as f32 - 1.0, h as f32 - 1.0);
     let r = radius as f32;
-    let last = size.saturating_sub(1) as f32;
-    // Solo esquinas: redondea el alpha fuera del círculo de cada esquina.
-    for y in 0..size {
+    for y in 0..h {
         let cy = if (y as f32) < r { r }
-            else if (y as f32) > last - r { last - r }
+            else if (y as f32) > ly - r { ly - r }
             else { continue };
-        for x in 0..size {
+        for x in 0..w {
             let cx = if (x as f32) < r { r }
-                else if (x as f32) > last - r { last - r }
+                else if (x as f32) > lx - r { lx - r }
                 else { continue };
-            let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
-            let px = img.get_pixel_mut(x, y);
-            if d >= r {
-                px.0[3] = 0;
-            } else if d > r - 1.0 {
-                px.0[3] = (((r - d) * 255.0) as u8).min(px.0[3]);
+            let mut inside = 0u32;
+            for sy in 0..4 {
+                let py = y as f32 + (sy as f32 + 0.5) / 4.0;
+                for sx in 0..4 {
+                    let px = x as f32 + (sx as f32 + 0.5) / 4.0;
+                    if ((px - cx).powi(2) + (py - cy).powi(2)).sqrt() < r {
+                        inside += 1;
+                    }
+                }
             }
+            let p = img.get_pixel_mut(x, y);
+            p.0[3] = ((inside as f32 / 16.0) * p.0[3] as f32) as u8;
         }
     }
+}
 
-    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(size, size);
-    buf.make_mut_bytes().copy_from_slice(&img);
-    Some(slint::Image::from_rgba8(buf))
+fn to_slint(img: &image::RgbaImage) -> slint::Image {
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(img.width(), img.height());
+    buf.make_mut_bytes().copy_from_slice(img);
+    slint::Image::from_rgba8(buf)
+}
+
+// `max`: lado en px. `radius`: esquinas redondeadas horneadas en el alpha.
+fn cover_to_image(bytes: &[u8], max: u32, radius: u32) -> Option<slint::Image> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    // shortcut: carátulas gigantes se reescalan, ampliar a caché en disco si hace falta.
+    let mut sq = image::imageops::resize(&img, max, max, image::imageops::FilterType::Triangle);
+    round_corners(&mut sq, radius);
+    Some(to_slint(&sq))
+}
+
+// Hueco sin portada del reproductor. Se pinta aquí porque en el renderer
+// software un `background: @linear-gradient` se dibuja plano e ignora
+// `border-radius`; así el gradiente también sale redondeado.
+pub fn placeholder_cover(size: u32, radius: u32) -> slint::Image {
+    let mut img = image::RgbaImage::new(size, size);
+    let last = (size.max(2) - 1) as f32;
+    let from = [0x1au8, 0x20, 0x29];
+    let to = [0x2du8, 0x37, 0x48];
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        // Gradiente a 135°: diagonal arriba-izquierda → abajo-derecha.
+        let t = ((x as f32 + y as f32) / (2.0 * last)).clamp(0.0, 1.0);
+        for c in 0..3 {
+            p.0[c] = (from[c] as f32 + (to[c] as f32 - from[c] as f32) * t) as u8;
+        }
+        p.0[3] = 255;
+    }
+    round_corners(&mut img, radius);
+    to_slint(&img)
 }
 
 // Escanea la carpeta y la deja lista para `ui.set_tracks`.
@@ -71,7 +89,7 @@ pub fn track_entries(dir: &Path) -> Vec<TrackEntry> {
         // Las filas muestran la carátula a 48px: decodificarla a tamaño
         // completo aquí gastaba ~800KB de RAM por pista. 8px de radio =
         // `border-radius` de la fila, horneado en el alpha.
-        let (cover, has_cover) = t.cover_bytes.as_deref().and_then(|b| cover_to_thumb(b, 48, 8))
+        let (cover, has_cover) = t.cover_bytes.as_deref().and_then(|b| cover_to_image(b, 48, 8))
             .map(|img| (img, true))
             .unwrap_or_default();
         entries.push(TrackEntry {
@@ -94,9 +112,9 @@ fn show_track_info(ui: &AppWindow, path: &Path) -> f32 {
     ui.set_duration_label(metadata::fmt_mmss(info.duration_secs).into());
     ui.set_elapsed_label("00:00".into());
     ui.set_progress(0.0);
-    match info.cover_bytes.as_deref().and_then(|b| cover_to_image(b, 512)) {
+    match info.cover_bytes.as_deref().and_then(|b| cover_to_image(b, 512, 40)) {
         Some(img) => { ui.set_cover(img); ui.set_has_cover(true); }
-        None => ui.set_has_cover(false),
+        None => { ui.set_cover(placeholder_cover(260, 20)); ui.set_has_cover(false); }
     }
     info.duration_secs
 }

@@ -1,7 +1,9 @@
 import { TrackEntry } from "models.slint";
 import { TrackRow } from "library_row.slint";
-import { LineEdit, ListView } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
 import { FolderOpenIcon, FileAudioIcon } from "@lucide";
+
+// Altura de una fila: 68px, la misma de library_row.slint.
 
 // Vista Biblioteca: explorador de archivos de audio. Rust provee `tracks`
 // escaneando `folder-path`; los callbacks piden reescanear o reproducir.
@@ -13,7 +15,27 @@ export component LibraryView inherits Rectangle {
     callback open-folder();
     callback track-clicked(int);
 
-    background: #10151b;
+    // --- Ajustes del scroll: una línea cada uno ---
+    // Techo de frames del scroll. El Flickable de Slint anima la rueda 180 ms
+    // a 60 Hz (11 frames por muesca) y eso es lo que satura el core; aquí el
+    // scroll lo mueve nuestro Timer, con este techo.
+    in property <int> scroll-fps: 12;
+    // Píxeles que avanza el scroll en cada tick (velocidad = step × fps).
+    in property <length> scroll-step-px: 90px;
+
+    // Posición del scroll (0 = arriba, crece al bajar) y objetivo acumulado
+    // por la rueda.
+    in-out property <length> scroll-y: 0;
+    in-out property <length> scroll-target-y: 0;
+    // El Timer corre mientras queda objetivo por alcanzar.
+    in-out property <bool> scrolling: false;
+
+    background: transparent;
+
+    changed tracks => {
+        root.scroll-y = 0;
+        root.scroll-target-y = 0;
+    }
 
     VerticalLayout {
         padding: 24px;
@@ -83,19 +105,93 @@ export component LibraryView inherits Rectangle {
         }
 
         // --- Lista de archivos ---
-        // ListView virtualiza: solo instancia las filas visibles. Con Flickable
-        // + `for` se creaban las ~300 filas de golpe (scroll y RAM disparados).
-        if root.tracks.length > 0: ListView {
+        // Sin Flickable: el scroll lo movemos nosotros (el contenido se
+        // desplaza con `y: -scroll-y`) y lo limita un Timer a `scroll-fps`.
+        // El Flickable de Slint anima la rueda 180 ms a 60 Hz (11 frames por
+        // muesca) y eso es lo que satura el core.
+        if root.tracks.length > 0: Rectangle {
             vertical-stretch: 1;
+            clip: true;
+            // Alto visible de la lista (lo reparte el layout).
+            property <length> visible-height: self.height;
+            property <length> content-height: root.tracks.length * 68px;
+            property <length> max-scroll: max(0px, self.content-height - self.visible-height);
 
-            for item[idx] in root.tracks: TrackRow {
-                track-title: item.title;
-                track-artist: item.artist;
-                file-name: item.file-name;
-                cover: item.cover;
-                has-cover: item.has-cover;
-                is-selected: idx == root.selected-index;
-                clicked => { root.track-clicked(idx); }
+            // Contenido: se desplaza con el scroll.
+            Rectangle {
+                x: 0;
+                y: -root.scroll-y;
+                width: parent.width;
+                height: parent.content-height;
+                // Las filas lo usan para acotar el scroll.
+                property <length> max-scroll: parent.max-scroll;
+
+                for item[idx] in root.tracks: TrackRow {
+                    // Posición y tamaño explícitos: sin layout que los reparta.
+                    y: idx * 68px;
+                    width: parent.width;
+                    track-title: item.title;
+                    track-artist: item.artist;
+                    cover: item.cover;
+                    has-cover: item.has-cover;
+                    is-selected: idx == root.selected-index;
+                    clicked => { root.track-clicked(idx); }
+                    scroll-down(dy) => {
+                        root.scroll-target-y = max(0px, min(parent.max-scroll, root.scroll-target-y + dy));
+                        root.scrolling = true;
+                    }
+                }
+            }
+
+            // Barra de scroll propia.
+            Rectangle {
+                x: parent.width - 6px;
+                width: 4px;
+                height: parent.height;
+                background: transparent;
+                visible: parent.max-scroll > 0px;
+
+                property <length> visible-height: parent.visible-height;
+                property <length> max-scroll: parent.max-scroll;
+                property <length> thumb-height: max(28px, parent.visible-height * (parent.visible-height / max(1px, parent.content-height)));
+
+                Rectangle {
+                    width: parent.width;
+                    height: parent.thumb-height;
+                    y: (root.scroll-y / max(1px, parent.max-scroll)) * (parent.height - parent.thumb-height);
+                    border-radius: 2px;
+                    background: #ffffff40;
+                }
+
+                TouchArea {
+                    x: -4px;
+                    width: parent.width + 8px;
+                    height: parent.height;
+                    mouse-cursor: pointer;
+
+                    property <length> drag-start-y: 0px;
+                    property <length> drag-start-scroll: 0px;
+
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            self.drag-start-y = self.mouse-y;
+                            self.drag-start-scroll = root.scroll-y;
+                        } else if (event.kind == PointerEventKind.move) {
+                            if (parent.max-scroll > 0px) {
+                                let delta = (self.mouse-y - self.drag-start-y)
+                                    * (parent.max-scroll / max(1px, parent.visible-height - parent.thumb-height));
+                                root.scroll-y = max(0px, min(parent.max-scroll, self.drag-start-scroll + delta));
+                                root.scroll-target-y = root.scroll-y;
+                            }
+                        }
+                    }
+
+                    scroll-event(event) => {
+                        root.scroll-target-y = max(0px, min(parent.max-scroll, root.scroll-target-y - event.delta-y));
+                        root.scrolling = true;
+                        return accept;
+                    }
+                }
             }
         }
 
@@ -109,6 +205,22 @@ export component LibraryView inherits Rectangle {
                 font-size: 13px;
                 horizontal-alignment: center;
                 wrap: word-wrap;
+            }
+        }
+    }
+
+    // Motor del scroll: mueve la lista hacia el objetivo a `scroll-fps` ticks
+    // por segundo y se para en cuanto llega.
+    Timer {
+        interval: 1000ms / root.scroll-fps;
+        running: root.scrolling;
+        triggered => {
+            let delta = root.scroll-target-y - root.scroll-y;
+            if (abs(delta) <= root.scroll-step-px) {
+                root.scroll-y = root.scroll-target-y;
+                root.scrolling = false;
+            } else {
+                root.scroll-y = root.scroll-y + (delta < 0px ? -root.scroll-step-px : root.scroll-step-px);
             }
         }
     }

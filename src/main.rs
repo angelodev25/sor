@@ -11,11 +11,23 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use ui::AppWindow;
 
 use crate::audio::{Controls, EqParams, LimiterParams, OutputParams};
-use crate::playback::{spawn_engine, track_entries, start_track};
+use crate::playback::{placeholder_cover, spawn_engine, start_track, track_entries};
 
 fn main() -> Result<(), Box<dyn StdError>> {
+    // Backend de Slint: por defecto el renderer software (winit-software).
+    // En una GPU vieja (i915/G33) el FemtoVG con OpenGL acaba ejecutando los
+    // shaders GLSL en CPU y hunde el rendimiento: idle 18% -> 4%, RAM 20% -> 1%.
+    // Se puede sobrescribir con SLINT_BACKEND=... en el entorno.
+    if std::env::var_os("SLINT_BACKEND").is_none() {
+        slint::BackendSelector::new()
+            .backend_name("winit-software".into())
+            .select()?;
+    }
+
     let ui = AppWindow::new()?;
     ui.set_track_title("Titulo".into());
+    // Hueco inicial del reproductor, redondeado (el gradiente de Slint no lo está).
+    ui.set_cover(placeholder_cover(260, 20));
 
     // Estado compartido
     let controls = Arc::new(Controls::new());

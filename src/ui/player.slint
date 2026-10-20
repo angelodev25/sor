@@ -57,13 +57,16 @@ export component Player inherits Rectangle {
             Rectangle {
                 width: root.compact ? 160px : 260px;
                 height: root.compact ? 160px : 260px;
+                // Solo para el borde: el redondeo del contenido viene horneado
+                // en el alpha de la imagen (el software renderer no soporta
+                // `border-radius` + `clip`, y los gradientes de Slint lo ignoran).
                 border-radius: 20px;
-                background: @linear-gradient(135deg, #1a2029, #2d3748);
+                background: transparent;
                 border-width: 1px;
                 border-color: #ffffff12;
-                clip: true;
 
-                if root.has-cover: Image {
+                // Con portada es la carátula; sin ella, el hueco ya redondeado.
+                Image {
                     width: 100%;
                     height: 100%;
                     source: root.cover;
