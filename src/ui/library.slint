@@ -177,7 +177,9 @@ export component LibraryView inherits Rectangle {
                             self.drag-start-y = self.mouse-y;
                             self.drag-start-scroll = root.scroll-y;
                         } else if (event.kind == PointerEventKind.move) {
-                            if (parent.max-scroll > 0px) {
+                            // Solo si el botón está pulsado: si no, con solo
+                            // pasar el ratón por encima la barra se movía sola.
+                            if (self.pressed && parent.max-scroll > 0px) {
                                 let delta = (self.mouse-y - self.drag-start-y)
                                     * (parent.max-scroll / max(1px, parent.visible-height - parent.thumb-height));
                                 root.scroll-y = max(0px, min(parent.max-scroll, self.drag-start-scroll + delta));

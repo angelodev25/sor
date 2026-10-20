@@ -38,7 +38,7 @@ Rust music player: custom DSP engine (`cpal` callback) + `ffmpeg` subprocess dec
 - `cache-rendering-hint` no existe en el renderer software: inerte, no lo pongas.
 - Los elementos **repetidos** (`for`) no reciben geometría por defecto: hay que darles `width`/`height`/`y` explícitos si su padre no es un layout. Por eso las filas de la biblioteca los posiciona a mano (`y: idx * 68px`).
 - `id` no existe en los builtins (Rectangle, Flickable, Timer), solo en componentes propios.
-- Un `TouchArea` **siempre** se queda con el ratón al pulsar (`GrabMouse`), tenga o no callback `pointer-event`: no sirve de overlay transparente.
+- Un `TouchArea` **siempre** se queda con el ratón al pulsar (`GrabMouse`), tenga o no callback `pointer-event`: no sirve de overlay transparente. Y su `pointer-event` recibe `move` también al pasar el ratón por encima: para arrastrar hay que comprobar `self.pressed`.
 - El `Flickable`/`ListView` de std-widgets anima la rueda 180 ms a 60 Hz (≈11 frames por muesca) y repinta el viewport entero: en un core lento satura la CPU. La biblioteca usa su propio motor (`scroll-fps` / `scroll-step-px` en `library.slint`).
 
 ### Rendimiento

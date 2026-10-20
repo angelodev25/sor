@@ -174,9 +174,9 @@ impl AudioEngine {
 
                 // Misma logica con el limitador
                 if last_lim_ceiling != ceiling_value { limiter.set_ceiling_db(ceiling_value); last_lim_ceiling = ceiling_value; }
-                if lim_values[0] != last_lim[0] { println!("Cambiar lookahead"); last_lim[0] = lim_values[0]; }
-                if lim_values[1] != last_lim[1] { println!("Cambiar attack"); last_lim[1] = lim_values[1]; }
-                if lim_values[2] != last_lim[2] { println!("Cambiar release"); last_lim[2] = lim_values[2]; }
+                if lim_values[0] != last_lim[0] { last_lim[0] = lim_values[0]; }
+                if lim_values[1] != last_lim[1] { last_lim[1] = lim_values[1]; }
+                if lim_values[2] != last_lim[2] { last_lim[2] = lim_values[2]; }
 
                 let paused = cb_controls.paused.load(Ordering::Relaxed);
                 let eq_on = cb_output.eq_enabled.load(Ordering::Relaxed);
