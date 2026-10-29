@@ -104,6 +104,23 @@ pub fn track_entries(dir: &Path) -> Vec<TrackEntry> {
     entries
 }
 
+// Vista completa de una carpeta: ruta actual, padre, subcarpetas y pistas.
+#[derive(Clone)]
+pub struct FolderView {
+    pub current_path: PathBuf,
+    pub parent_path: Option<PathBuf>,
+    pub subdirs: Vec<PathBuf>,
+    pub tracks: Vec<TrackEntry>,
+}
+
+// Construye FolderView para una ruta dada.
+pub fn folder_entries(dir: &Path) -> FolderView {
+    let parent = dir.parent().map(|p| p.to_path_buf());
+    let subdirs = library::list_subdirs(dir);
+    let tracks = track_entries(dir);
+    FolderView { current_path: dir.to_path_buf(), parent_path: parent, subdirs, tracks }
+}
+
 // Muestra los metadatos de una pista en el Player. Devuelve la duración.
 fn show_track_info(ui: &AppWindow, path: &Path) -> f32 {
     let info = metadata::read_metadata(path);

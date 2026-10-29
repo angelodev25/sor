@@ -5,6 +5,7 @@ import { EqPanel } from "eq_panel.slint";
 import { LibraryView } from "library.slint";
 import { NowPlaying } from "now_playing.slint";
 import { TrackEntry } from "models.slint";
+import { SubdirEntry } from "models.slint";
 import { LayoutBreakpoints } from "theme.slint";
 
 export component AppWindow inherits Window {
@@ -33,8 +34,12 @@ export component AppWindow inherits Window {
 
     // ---- Biblioteca (modelo real desde Rust) ----
     in-out property <[TrackEntry]> tracks;
-    in-out property <string> folder-path: "";
+    in-out property <string> folder-path: "/home/angelo/Música/";
+    in-out property <string> folder-name: "Música";
     in-out property <int> selected-track: -1;
+    in-out property <[SubdirEntry]> subdirs;
+    in-out property <int> active-tab-index: 0;
+    in-out property <bool> show-back-arrow: false;
 
     // ---- Parametros del EQ, expuestos para que Rust los pueda tocar ----
     in-out property <float> eq-low-gain: 0;
@@ -65,6 +70,9 @@ export component AppWindow inherits Window {
     callback output-changed();
     callback open-folder();
     callback track-clicked(int);
+    callback navigate(string);
+    callback go-back();
+    callback tab-changed(int);
 
     // Umbrales centralizados en theme.slint (un solo sitio a editar).
     property <bool> is-wide: root.width >= LayoutBreakpoints.wide;
@@ -83,9 +91,16 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             tracks <=> root.tracks;
             folder-path <=> root.folder-path;
+            folder-name <=> root.folder-name;
             selected-index <=> root.selected-track;
+            subdirs <=> root.subdirs;
+            active-tab-index <=> root.active-tab-index;
+            show-back-arrow <=> root.show-back-arrow;
             open-folder => { root.open-folder(); }
             track-clicked(idx) => { root.track-clicked(idx); }
+            navigate(path) => { root.navigate(path); }
+            go-back => { root.go-back(); }
+            tab-changed(idx) => { root.tab-changed(idx); }
         }
 
         if root.current-view != 1: HorizontalLayout {
@@ -154,9 +169,16 @@ export component AppWindow inherits Window {
             horizontal-stretch: 1;
             tracks <=> root.tracks;
             folder-path <=> root.folder-path;
+            folder-name <=> root.folder-name;
             selected-index <=> root.selected-track;
+            subdirs <=> root.subdirs;
+            active-tab-index <=> root.active-tab-index;
+            show-back-arrow <=> root.show-back-arrow;
             open-folder => { root.open-folder(); }
             track-clicked(idx) => { root.track-clicked(idx); }
+            navigate(path) => { root.navigate(path); }
+            go-back => { root.go-back(); }
+            tab-changed(idx) => { root.tab-changed(idx); }
         }
 
         // Línea que separa el bloque izquierdo (biblioteca) del derecho.

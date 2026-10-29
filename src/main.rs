@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 mod audio;
+mod config;
 mod playback;
 mod ui;
 
@@ -11,7 +12,9 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use ui::AppWindow;
 
 use crate::audio::{Controls, EqParams, LimiterParams, OutputParams};
-use crate::playback::{placeholder_cover, spawn_engine, start_track, track_entries};
+use crate::config::LibraryConfig;
+use crate::playback::{placeholder_cover, spawn_engine, start_track, folder_entries, FolderView};
+use crate::audio::library::get_music_dir;
 
 fn main() -> Result<(), Box<dyn StdError>> {
     // Backend de Slint: por defecto el renderer software (winit-software).
@@ -70,7 +73,6 @@ fn main() -> Result<(), Box<dyn StdError>> {
     ui.set_eq_limiter_ceiling(1.5);
     ui.set_eq_volume(0.75);
 
-    
     {
         let ui_handle_eq = ui.as_weak();
         let eq_params_eq = eq_params.clone();
@@ -121,21 +123,121 @@ fn main() -> Result<(), Box<dyn StdError>> {
     // Motor en su hilo gestor + stream persistente. Falla rápido si no hay audio.
     let ctx = spawn_engine(controls, eq_params, limiter_params, output_params)?;
 
-    // Biblioteca inicial: carpeta actual.
-    {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        ui.set_folder_path(cwd.to_string_lossy().into_owned().into());
-        ui.set_tracks(ModelRc::new(VecModel::from(track_entries(&cwd))));
+    // --- Inicialización de la Biblioteca con persistencia ---
+    let mut lib_config = LibraryConfig::load();
+    let start_dir = lib_config.get_last_folder().unwrap_or_else(get_music_dir);
+    let initial_view = folder_entries(&start_dir);
+
+    // Poblar UI inicial
+    ui.set_folder_path(initial_view.current_path.to_string_lossy().into_owned().into());
+    ui.set_folder_name(initial_view.current_path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+        .into());
+    ui.set_tracks(ModelRc::new(VecModel::from(initial_view.tracks)));
+    ui.set_selected_track(-1);
+    
+    // Subdirectorios como SubdirEntry para la UI
+    let subdirs_entries: Vec<crate::ui::SubdirEntry> = initial_view.subdirs
+        .iter()
+        .map(|p| crate::ui::SubdirEntry {
+            name: p.file_name().unwrap_or_default().to_string_lossy().into_owned().into(),
+            path: p.to_string_lossy().into_owned().into(),
+        })
+        .collect();
+    ui.set_subdirs(ModelRc::new(VecModel::from(subdirs_entries)));
+    ui.set_active_tab_index(0);
+    ui.set_show_back_arrow(initial_view.parent_path.is_some());
+
+    // Guardar carpeta inicial si no había config previa
+    if lib_config.last_folder.is_empty() {
+        lib_config.set_last_folder(&start_dir);
     }
 
-    // Reescanea la ruta escrita en la barra de la Biblioteca.
+    // Helper para actualizar la UI desde un FolderView
+    let update_ui_from_view = |ui: &AppWindow, view: &FolderView, config: &mut LibraryConfig| {
+        ui.set_folder_path(view.current_path.to_string_lossy().into_owned().into());
+        ui.set_folder_name(view.current_path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+            .into());
+        ui.set_tracks(ModelRc::new(VecModel::from(view.tracks.clone())));
+        ui.set_selected_track(-1);
+        
+        let subdirs_entries: Vec<crate::ui::SubdirEntry> = view.subdirs
+            .iter()
+            .map(|p| crate::ui::SubdirEntry {
+                name: p.file_name().unwrap_or_default().to_string_lossy().into_owned().into(),
+                path: p.to_string_lossy().into_owned().into(),
+            })
+            .collect();
+        ui.set_subdirs(ModelRc::new(VecModel::from(subdirs_entries)));
+        ui.set_active_tab_index(0);
+        ui.set_show_back_arrow(view.parent_path.is_some());
+        
+        config.set_last_folder(&view.current_path);
+    };
+
+    // Callback: navegar a una ruta (desde tab click, back, etc.)
+    {
+        let ui_handle_nav = ui.as_weak();
+        let mut config_nav = lib_config.clone();
+        ui.on_navigate(move |path_str| {
+            let Some(ui) = ui_handle_nav.upgrade() else { return };
+            let path = PathBuf::from(path_str.as_str());
+            let view = folder_entries(&path);
+            update_ui_from_view(&ui, &view, &mut config_nav);
+        });
+    }
+
+    // Callback: volver a carpeta padre
+    {
+        let ui_handle_back = ui.as_weak();
+        let mut config_back = lib_config.clone();
+        ui.on_go_back(move || {
+            let Some(ui) = ui_handle_back.upgrade() else { return };
+            let current = PathBuf::from(ui.get_folder_path().as_str());
+            if let Some(parent) = current.parent() {
+                let view = folder_entries(parent);
+                update_ui_from_view(&ui, &view, &mut config_back);
+            }
+        });
+    }
+
+    // Callback: cambiar pestaña (0 = carpeta actual, 1+ = subdirs)
+    {
+        let ui_handle_tab = ui.as_weak();
+        let mut config_tab = lib_config.clone();
+        ui.on_tab_changed(move |tab_idx| {
+            let Some(ui) = ui_handle_tab.upgrade() else { return };
+            let current = PathBuf::from(ui.get_folder_path().as_str());
+            let subdirs_model = ui.get_subdirs();
+            
+            let target_path = if tab_idx == 0 {
+                // Carpeta actual
+                current.clone()
+            } else if let Some(subdir) = subdirs_model.row_data((tab_idx - 1) as usize) {
+                PathBuf::from(subdir.path.as_str())
+            } else {
+                return;
+            };
+            
+            let view = folder_entries(&target_path);
+            update_ui_from_view(&ui, &view, &mut config_tab);
+        });
+    }
+
+    // Reescanea la ruta escrita en la barra de la Biblioteca (legacy open-folder)
     {
         let ui_handle_scan = ui.as_weak();
+        let mut config_scan = lib_config.clone();
         ui.on_open_folder(move || {
             let Some(ui) = ui_handle_scan.upgrade() else { return };
             let dir = PathBuf::from(ui.get_folder_path().as_str());
-            ui.set_tracks(ModelRc::new(VecModel::from(track_entries(&dir))));
-            ui.set_selected_track(-1);
+            let view = folder_entries(&dir);
+            update_ui_from_view(&ui, &view, &mut config_scan);
         });
     }
 

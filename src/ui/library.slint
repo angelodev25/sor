@@ -1,34 +1,44 @@
 import { TrackEntry } from "models.slint";
 import { TrackRow } from "library_row.slint";
-import { LineEdit } from "std-widgets.slint";
-import { FolderOpenIcon, FileAudioIcon } from "@lucide";
+import { SubdirEntry } from "models.slint";
+import { FileAudioIcon, ArrowLeftIcon, FolderIcon } from "@lucide";
 
 // Altura de una fila: 68px, la misma de library_row.slint.
 
-// Vista Biblioteca: explorador de archivos de audio. Rust provee `tracks`
-// escaneando `folder-path`; los callbacks piden reescanear o reproducir.
+// Vista Biblioteca: navegador estilo browser con pestañas de subcarpetas.
 export component LibraryView inherits Rectangle {
     in-out property <[TrackEntry]> tracks;
     in-out property <string> folder-path: "";
+    in-out property <string> folder-name: "Música";
     in-out property <int> selected-index: -1;
+    in-out property <[SubdirEntry]> subdirs;
+    in-out property <int> active-tab-index: 0;  // 0 = carpeta actual, 1+ = subdirs
+    in-out property <bool> show-back-arrow: true;
+    subdirs: [{name: "musica", path: "/home"}];
 
     callback open-folder();
     callback track-clicked(int);
+    callback navigate(string);
+    callback go-back();
+    callback tab-changed(int);
 
-    // --- Ajustes del scroll: una línea cada uno ---
-    // Techo de frames del scroll. El Flickable de Slint anima la rueda 180 ms
-    // a 60 Hz (11 frames por muesca) y eso es lo que satura el core; aquí el
-    // scroll lo mueve nuestro Timer, con este techo.
+    // --- Ajustes del scroll vertical ---
     in property <int> scroll-fps: 12;
-    // Píxeles que avanza el scroll en cada tick (velocidad = step × fps).
     in property <length> scroll-step-px: 90px;
 
-    // Posición del scroll (0 = arriba, crece al bajar) y objetivo acumulado
-    // por la rueda.
     in-out property <length> scroll-y: 0;
     in-out property <length> scroll-target-y: 0;
-    // El Timer corre mientras queda objetivo por alcanzar.
     in-out property <bool> scrolling: false;
+
+    // --- Scroll horizontal de pestañas ---
+    in-out property <length> tabs-scroll-x: 0px;
+    in-out property <length> tabs-scroll-target-x: 0px;
+    in-out property <bool> tabs-scrolling: false;
+
+    // --- Animación neon underline ---
+    in-out property <float> neon-progress: 1.0;
+    in-out property <length> neon-target-x: 0px;
+    in-out property <length> neon-target-width: 0px;
 
     background: transparent;
 
@@ -41,93 +51,275 @@ export component LibraryView inherits Rectangle {
         padding: 24px;
         spacing: 12px;
 
-        // --- Barra tipo explorador: ruta editable + botón cargar ---
-        HorizontalLayout {
-            spacing: 12px;
-            height: 36px;
+        // --- Barra superior: icono + título + navegación + pestañas ---
+        Rectangle {
+            height: 56px;
+            background: transparent;
 
             HorizontalLayout {
-                spacing: 8px;
+                spacing: 12px;
+                alignment: start;
 
-                FileAudioIcon {
-                    size: 18px;
-                    colorize: #00e5ff;
-                    vertical-alignment: center;
-                    y: (parent.height - self.height) / 2;
-                }
-
-                Text {
-                    text: "Biblioteca";
-                    color: #f5f5fa;
-                    font-size: 16px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-            }
-
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.folder-path;
-                placeholder-text: "Ruta de la carpeta con tu música…";
-                accepted => { root.open-folder(); }
-            }
-
-            Rectangle {
-                width: 150px;
-                border-radius: 8px;
-                background: #1c2230;
-
+                // Icono + título "Biblioteca" (fijo, a la izquierda)
                 HorizontalLayout {
-                    alignment: center;
                     spacing: 8px;
+                    alignment: center;
 
-                    FolderOpenIcon {
-                        size: 15px;
-                        colorize: #e8e8ee;
-                        vertical-alignment: center;
-                        y: (parent.height - self.height) / 2;
+                    VerticalLayout {
+                        height: 100%;
+                        alignment: center;
+
+                        FileAudioIcon {
+                            size: 25px;
+                            colorize: #00e5ff;
+                        }
                     }
 
                     Text {
-                        text: "Abrir carpeta";
-                        color: #e8e8ee;
-                        font-size: 12px;
-                        font-weight: 600;
+                        text: "Biblioteca";
+                        color: #f5f5fa;
+                        font-size: 16px;
+                        font-weight: 700;
                         vertical-alignment: center;
                     }
                 }
 
-                TouchArea {
+                // Flecha "volver" (controlada por propiedad show-back-arrow)
+                if root.show-back-arrow: TouchArea {
+                    width: 40px;
+                    height: 40px;
                     mouse-cursor: pointer;
-                    clicked => { root.open-folder(); }
+
+                    Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        border-radius: 8px;
+                        background: #1c2230;
+
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 2px;
+                            height: parent.height - 2px;
+                            border-radius: 7px;
+                            background: transparent;
+                            border-width: 1px;
+                            border-color: #ffffff14;
+                        }
+
+                        ArrowLeftIcon {
+                            size: 18px;
+                            colorize: #e8e8ee;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                    clicked => { root.go-back(); }
+                }
+
+                // Contenedor de pestañas con scroll horizontal
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 100%;
+                    width: 85%;
+                    background: transparent;
+                    clip: true;
+
+                    // ── Capa 1 (DETRÁS): scroll + drag ──
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        mouse-cursor: grab;
+
+                        scroll-event(event) => {
+                            // Acepta rueda vertical y horizontal: ambas mueven las tabs.
+                            let delta = event.delta-x + event.delta-y;
+                            if (delta != 0) {
+                                let max-scroll = max(0px, root.subdirs.length * 150px - parent.width);
+                                root.tabs-scroll-target-x = max(0px, min(max-scroll, root.tabs-scroll-target-x + delta * 3));
+                                root.tabs-scrolling = true;
+                                return accept;
+                            }
+                            return reject;
+                        }
+
+                        property <length> drag-start-x: 0px;
+                        property <length> drag-start-scroll: 0px;
+
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) {
+                                self.drag-start-x = self.mouse-x;
+                                self.drag-start-scroll = root.tabs-scroll-x;
+                            } else if (event.kind == PointerEventKind.move && self.pressed) {
+                                let delta = self.mouse-x - self.drag-start-x;
+                                let max-scroll = max(0px, root.subdirs.length * 150px - parent.width);
+                                root.tabs-scroll-x = max(0px, min(max-scroll, self.drag-start-scroll - delta));
+                                root.tabs-scroll-target-x = root.tabs-scroll-x;
+                            }
+                        }
+                    }
+
+                    // ── Capa 2 (ENCIMA): los tabs ──
+                    HorizontalLayout {
+                        x: -root.tabs-scroll-x;
+                        spacing: 8px;
+                        alignment: start;
+                        height: 75%;
+
+                        // Pestaña 0: Carpeta actual (sin cambios)
+                        Rectangle {
+                            height: 100%;
+                            min-width: 120px;
+                            max-width: 200px;
+                            border-radius: 8px;
+                            background: root.active-tab-index == 0 ? #1c2230 : transparent;
+
+                            Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: 1px; background: #ffffff14; }
+                            Rectangle { x: 1px; y: 1px; width: 1px; height: parent.height - 2px; background: #ffffff14; }
+                            Rectangle { x: parent.width - 2px; y: 1px; width: 1px; height: parent.height - 2px; background: #ffffff14; }
+                            Rectangle { x: 1px; y: parent.height - 1px; width: parent.width - 2px; height: 1px; background: root.active-tab-index == 0 ? transparent : #ffffff14; }
+
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 8px;
+                                alignment: start;
+
+                                VerticalLayout {
+                                    height: 100%;
+                                    alignment: center;
+                                    FolderIcon {
+                                        size: 14px;
+                                        colorize: root.active-tab-index == 0 ? #00e5ff : #8f8f9c;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Text {
+                                    text: root.folder-name;
+                                    color: root.active-tab-index == 0 ? #f5f5fa : #8f8f9c;
+                                    font-size: 12px;
+                                    font-weight: root.active-tab-index == 0 ? 600 : 400;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                    wrap: no-wrap;
+                                }
+                            }
+
+                            if root.active-tab-index == 0: Rectangle {
+                                x: 1px; y: 1px;
+                                width: parent.width - 2px;
+                                height: parent.height - 2px;
+                                border-radius: 7px;
+                                background: transparent;
+                                border-width: 1px;
+                                border-color: #00e5ff40;
+                            }
+                        }
+
+                        // Pestañas de subcarpetas
+                        for subdir[idx] in root.subdirs: Rectangle {
+                            height: 100%;
+                            min-width: 100px;
+                            max-width: 180px;
+                            border-radius: 8px;
+                            background: root.active-tab-index == (idx + 1) ? #1c2230 : transparent;
+
+                            Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: 1px; background: #ffffff14; }
+                            Rectangle { x: 1px; y: 1px; width: 1px; height: parent.height - 2px; background: #ffffff14; }
+                            Rectangle { x: parent.width - 2px; y: 1px; width: 1px; height: parent.height - 2px; background: #ffffff14; }
+                            Rectangle { x: 1px; y: parent.height - 1px; width: parent.width - 2px; height: 1px; background: root.active-tab-index == (idx + 1) ? transparent : #ffffff14; }
+
+                            if root.active-tab-index == (idx + 1): Rectangle {
+                                x: 1px; y: 1px;
+                                width: parent.width - 2px;
+                                height: parent.height - 2px;
+                                border-radius: 7px;
+                                background: transparent;
+                                border-width: 1px;
+                                border-color: #00e5ff40;
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                spacing: 6px;
+                                alignment: start;
+                                
+                                VerticalLayout {
+                                    height: 100%;
+                                    alignment: center;
+                                    FolderIcon {
+                                        size: 13px;
+                                        colorize: root.active-tab-index == (idx + 1) ? #00e5ff : #8f8f9c;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Text {
+                                    text: subdir.name;
+                                    color: root.active-tab-index == (idx + 1) ? #f5f5fa : #8f8f9c;
+                                    font-size: 12px;
+                                    font-weight: root.active-tab-index == (idx + 1) ? 600 : 400;
+                                    vertical-alignment: center;
+                                    wrap: no-wrap;
+                                }
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.tab-changed(idx + 1); }
+                                // Reenvía la rueda por si el evento no baja al TouchArea de detrás.
+                                scroll-event(event) => {
+                                    let delta = event.delta-x + event.delta-y;
+                                    if (delta != 0) {
+                                        let max-scroll = max(0px, root.subdirs.length * 150px - parent.width);
+                                        root.tabs-scroll-target-x = max(0px, min(max-scroll, root.tabs-scroll-target-x + delta * 3));
+                                        root.tabs-scrolling = true;
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // --- Lista de archivos ---
-        // Sin Flickable: el scroll lo movemos nosotros (el contenido se
-        // desplaza con `y: -scroll-y`) y lo limita un Timer a `scroll-fps`.
-        // El Flickable de Slint anima la rueda 180 ms a 60 Hz (11 frames por
-        // muesca) y eso es lo que satura el core.
+        // Neon underline (línea simple animada bajo la pestaña activa)
+        Rectangle {
+            width: 100%;
+            height: 4px;
+            background: transparent;
+
+            Rectangle {
+                x: root.neon-target-x - root.neon-target-width / 2;
+                width: root.neon-target-width;
+                height: 2px;
+                y: 2px;
+                background: #00e5ff;
+                opacity: root.neon-progress;
+                border-radius: 1px;
+            }
+        }
+
+        // --- Lista de archivos (reutiliza scroll custom existente) ---
         if root.tracks.length > 0: Rectangle {
             vertical-stretch: 1;
             clip: true;
-            // Alto visible de la lista (lo reparte el layout).
             property <length> visible-height: self.height;
             property <length> content-height: root.tracks.length * 68px;
             property <length> max-scroll: max(0px, self.content-height - self.visible-height);
 
-            // Contenido: se desplaza con el scroll.
             Rectangle {
                 x: 0;
                 y: -root.scroll-y;
                 width: parent.width;
                 height: parent.content-height;
-                // Las filas lo usan para acotar el scroll.
                 property <length> max-scroll: parent.max-scroll;
 
                 for item[idx] in root.tracks: TrackRow {
-                    // Posición y tamaño explícitos: sin layout que los reparta.
                     y: idx * 68px;
                     width: parent.width;
                     track-title: item.title;
@@ -143,7 +335,7 @@ export component LibraryView inherits Rectangle {
                 }
             }
 
-            // Barra de scroll propia.
+            // Barra de scroll vertical (existente)
             Rectangle {
                 x: parent.width - 6px;
                 width: 4px;
@@ -177,8 +369,6 @@ export component LibraryView inherits Rectangle {
                             self.drag-start-y = self.mouse-y;
                             self.drag-start-scroll = root.scroll-y;
                         } else if (event.kind == PointerEventKind.move) {
-                            // Solo si el botón está pulsado: si no, con solo
-                            // pasar el ratón por encima la barra se movía sola.
                             if (self.pressed && parent.max-scroll > 0px) {
                                 let delta = (self.mouse-y - self.drag-start-y)
                                     * (parent.max-scroll / max(1px, parent.visible-height - parent.thumb-height));
@@ -202,7 +392,7 @@ export component LibraryView inherits Rectangle {
             alignment: center;
 
             Text {
-                text: "No hay archivos de audio aquí. Escribe una ruta y pulsa Abrir carpeta.";
+                text: root.subdirs.length > 0 ? "No hay archivos de audio en esta carpeta." : "Esta carpeta no tiene subcarpetas ni archivos de audio.";
                 color: #8f8f9c;
                 font-size: 13px;
                 horizontal-alignment: center;
@@ -211,8 +401,7 @@ export component LibraryView inherits Rectangle {
         }
     }
 
-    // Motor del scroll: mueve la lista hacia el objetivo a `scroll-fps` ticks
-    // por segundo y se para en cuanto llega.
+    // Motor del scroll vertical (existente)
     Timer {
         interval: 1000ms / root.scroll-fps;
         running: root.scrolling;
@@ -223,6 +412,21 @@ export component LibraryView inherits Rectangle {
                 root.scrolling = false;
             } else {
                 root.scroll-y = root.scroll-y + (delta < 0px ? -root.scroll-step-px : root.scroll-step-px);
+            }
+        }
+    }
+
+    // Motor del scroll horizontal de pestañas
+    Timer {
+        interval: 16ms;
+        running: root.tabs-scrolling;
+        triggered => {
+            let delta = root.tabs-scroll-target-x - root.tabs-scroll-x;
+            if (abs(delta) <= 20px) {
+                root.tabs-scroll-x = root.tabs-scroll-target-x;
+                root.tabs-scrolling = false;
+            } else {
+                root.tabs-scroll-x = root.tabs-scroll-x + (delta < 0px ? -20px : 20px);
             }
         }
     }
