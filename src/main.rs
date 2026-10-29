@@ -67,11 +67,11 @@ fn main() -> Result<(), Box<dyn StdError>> {
     ui.set_eq_high_shelf(4.0);
     ui.set_eq_high_air(6.0);
     ui.set_eq_master_gain(0.72);
-    ui.set_soft_clip_enabled(true);
+    ui.set_soft_clip_enabled(false);
     ui.set_soft_clipping(-1.2);
     ui.set_eq_limiter_enabled(true);
     ui.set_eq_limiter_ceiling(1.5);
-    ui.set_eq_volume(0.75);
+    ui.set_eq_volume(1.0);
 
     {
         let ui_handle_eq = ui.as_weak();

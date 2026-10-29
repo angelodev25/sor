@@ -12,25 +12,30 @@ Rust music player: custom DSP engine (`cpal` callback) + `ffmpeg` subprocess dec
 
 ## Architecture
 
-- `src/main.rs` — entrypoint only: shared state, initial EQ preset synced to UI, Slint callbacks (`eq-changed`, `limiter-changed`, `output-changed`, `open-folder`, `track-clicked`, `play-pause`).
-- `src/playback.rs` — UI↔engine bridge. `spawn_engine` creates the manager thread + persistent stream; `start_track` sends `PlayTrack{path,track_id}` over a channel and spawns the 250 ms progress thread; `track_entries`/`show_track_info` map disk → Slint rows and metadata → Player.
+- `src/main.rs` — entrypoint only: shared state, initial EQ preset synced to UI, Slint callbacks (`eq-changed`, `limiter-changed`, `output-changed`, `open-folder`, `navigate`, `go-back`, `tab-changed`, `track-clicked`, `play-pause`). Initializes library with last persisted folder or `~/Music` fallback.
+- `src/config.rs` — `LibraryConfig`: persists `last_folder` to `~/.config/sor/library.json` via `serde_json`. `load()`, `save()`, `get_last_folder()`, `set_last_folder()`.
+- `src/playback.rs` — UI↔engine bridge. `spawn_engine` creates the manager thread + persistent stream; `start_track` sends `PlayTrack{path,track_id}` over a channel and spawns the 250 ms progress thread; `track_entries`/`show_track_info` map disk → Slint rows and metadata → Player. **New:** `FolderView` struct + `folder_entries(dir)` returns current path, parent path, subdirs, and tracks for a directory.
+- `src/audio/library.rs` — `get_music_dir()` returns `~/Music`/`~/Música` (Linux) with fallback; `list_subdirs(dir)` returns immediate subdirectories sorted by name; `scan_folder`: NON-recursive scan, 11 extensions (mp3 m4a flac ogg oga opus wav aac wma aiff aif), sorted by `file_name`.
 - `src/audio/engine/engine.rs` — `AudioEngine` lives on its own manager thread (`cpal::Stream` is not `Send`). `start()` opens the stream ONCE per session; `play_track()` only swaps the data source. Requires stereo (`channels == 2` errors otherwise), ~25 ms buffer rounded to pow2 (min 512).
 - `src/audio/source.rs` — `AudioSource`: `Mutex<Option<Consumer<f32>>>` socket the callback always reads; `None` between tracks = silence, stream never restarts.
 - `src/audio/loader/streamer.rs` — `spawn_streamer`: `ffmpeg -f f32le pcm_f32le -ar <fs> -ac <ch> pipe:1` → reader thread → `rtrb` ringbuffer (3 s). At EOF the reader waits for the callback to drain the ring before signalling end. `Drop` kills ffmpeg + joins the thread.
-- `src/audio/library.rs` — `scan_folder`: NON-recursive scan, 11 extensions (mp3 m4a flac ogg oga opus wav aac wma aiff aif), sorted by `file_name`.
 - `src/audio/metadata.rs` — `read_metadata` via `lofty` (title/artist/duration/first picture); fallbacks "Pista desconocida"/"Artista desconocido". Progress = `frames_played` counted in the callback vs `duration_secs`.
 - `src/audio/controls.rs` — all UI→audio state is atomics (`Controls`, `EqParams`, `LimiterParams`, `OutputParams`). Never add locks in the `cpal` callback; never allocate there. `current_track: AtomicU64` + `generation` counter invalidate stale readers/progress threads; `dsp_reset` rebuilds the DSP chain virgin on track change (old reverb tail sounded like a low-mid thump otherwise).
 - `src/audio/eq/three_band.rs`, `compressor.rs`, `soft_clip.rs`, `engine/limiter.rs` — DSP: HPF 20 Hz → LR4 crossover (180/3500 Hz) → per-band comp+EQ → master gain → tanh soft-clip (ceiling 0.98) → lookahead limiter → volume. Biquads rebuild only on value change (cache compare in `engine.rs`) — keep that pattern.
 - `src/ui/*.slint` — `app_window.slint` is root (`Navbar + (Player | EqPanel | Library)`), compiled by `build.rs` with `slint-build` + `lucide` icon library.
+  - `library.slint` — Biblioteca navegador: barra superior con icono + "Biblioteca", flecha `←` (volver al padre), pestaña de carpeta actual (no clickeable), pestañas de subcarpetas con scroll horizontal (wheel + drag), lista de pistas con scroll custom (Timer limitado a `scroll-fps`). Nuevas propiedades: `folder-name`, `subdirs`, `active-tab-index`, `show-back-arrow`. Nuevos callbacks: `navigate(string)`, `go-back()`, `tab-changed(int)`.
+  - `models.slint` — `TrackEntry` + `SubdirEntry { name, path }`.
+  - `app_window.slint` — binds new library props/callbacks to `LibraryView`.
 
 ## Gotchas
 
 - Track switching is fully serialized in the manager thread — no mutex needed; don't reintroduce one (commit `98c4f1c`'s mutex is gone since `b17d3a4`).
 - `is_loading` / `song_loaded` / `song_ended` guards in `main.rs`/`playback.rs` prevent double-start and stale-end signalling; natural end rewinds to 00:00, pauses, and marks unloaded so next play restarts from zero.
-- Slint/Lucide rendering: `MusicIcon` never rasterizes under FemtoVG+MESA (only in Slint preview) — placeholder uses `HeadphonesIcon` (`5344ec0`). Lucide icons ignore `vertical-alignment`; centering uses the navbar wrapper trick.
+- Slint/Lucide rendering: `MusicIcon` never rasterizes under FemtoVG+MESA (only in Slint preview) — placeholder uses `HeadphonesIcon` (`5344ec0`). Lucide icons ignore `vertical-alignment`; centering uses the `VerticalLayout` wrapper trick (see `library.slint` tabs — icons are wrapped in `VerticalLayout` to center them since `vertical-alignment` does nothing on Lucide icons under the software renderer).
 - `cover_to_image` downscales covers >512 px (`playback.rs`, marked `shortcut:` — add disk cache if this gets slow).
 - `profile.dev` sets `opt-level = 1` (top) / `3` (deps) — builds are slow; prefer `cargo check` for iteration.
 - No test harness, no lint config, no CI. Do not add one unasked.
+- Library config persists to `~/.config/sor/library.json` — if a stale/invalid path is stored, `get_last_folder()` returns `None` and falls back to `~/Music`.
 
 ### Renderer software (Slint 1.17)
 

@@ -4,22 +4,28 @@ Reproductor de música en Rust. Nace de la calidad de salida de Mixxx con buena
 ecualización: el objetivo es esa pegada y claridad, pero en una app sencilla
 para escuchar música, sin la complejidad de una cabina DJ.
 
-## Estado actual (v0.3: biblioteca + motor persistente)
+## Estado actual (v0.4: biblioteca navegador + persistencia)
 
 - Motor DSP propio: HPF + crossover LR4 de 3 bandas + EQ + compresores por
   banda + soft clipper tanh + limitador lookahead + volumen. Todo en el
   callback de `cpal`, sin alocar, con parámetros atómicos desde la UI.
 - Stream `cpal` persistente: se abre una vez al arrancar; cambiar de pista
   solo intercambia la fuente de datos, sin reabrir el dispositivo.
-- Biblioteca: explorador de carpeta editable, lista solo archivos de audio
-  con carátula, título, artista y nombre de archivo; reproducir al pulsar
-  una fila, con cambio de pista limpio (sin doble click ni estados cruzados).
+- **Biblioteca estilo navegador** (vista nueva): se abre por defecto la carpeta
+  Música/Música del sistema (o `~/Music`); la parte superior muestra las
+  subcarpetas como pestañas con scroll horizontal; al hacer click en una pestaña
+  se carga automáticamente el contenido de esa carpeta; una flecha izquierda
+  permite volver a la carpeta padre. La carpeta visitada se persiste en
+  `~/.config/sor/library.json` y se restaura al arrancar.
+- Lista de pistas con carátula, título, artista y nombre de archivo; reproducir
+  al pulsar una fila, con cambio de pista limpio (sin doble click ni estados
+  cruzados).
 - Metadatos en el Player vía `lofty`: título, artista, duración, progreso
   (barra + tiempos) y carátula (o icono por defecto).
 - Decodificación universal vía `ffmpeg` en subprocess (MP3, AAC/M4A incluyendo
   HE-AACv2, FLAC, Opus, WAV, ALAC…).
 - UI en Slint: reproductor + panel de EQ con 9 perillas, drive, volumen,
-  clip y techo del limitador, con toggles + vista de biblioteca.
+  clip y techo del limitador, con toggles + vista de biblioteca navegador.
 
 ## Arquitectura
 
@@ -37,16 +43,24 @@ silencio sin cortar el stream. Un contador de generación invalida hilos de
 progreso y lectores de pistas sustituidas; al cambiar de pista la cadena DSP
 se reconstruye virgen (la cola del tema anterior sonaba como golpe grave-medio).
 
-### Archivos
+### Biblioteca (navegador de carpetas)
+
+| Flujo | Qué pasa |
+|-------|----------|
+| Arranque | `get_music_dir()` devuelve `~/Music` (o `~/Música` en Linux) o fallback `$HOME`. Si no existe, devuelve `~/Music`. Se carga `last_folder` desde `~/.config/sor/library.json` si hay una guardada y válida. |
+| Barra superior | Icono + "Biblioteca" (fijo, a la izquierda) | flecha `←` (solo si hay padre) | pestaña de carpeta actual (no clickeable) | pestañas de subcarpetas con scroll horizontal (wheel + drag). |
+| Click en pestaña | `tab-changed(i)` → `folder_entries(path)` → UI actualiza carpeta, subcarpetas y pistas. Se guarda en `library.json`. |
+| Flecha atrás | `go-back()` → sube al directorio padre y vuelve a cargar. |
 
 | Archivo | Rol |
 |---|---|
-| `src/main.rs` | Arranque + estado compartido + presets iniciales + cableado de callbacks Slint |
-| `src/playback.rs` | Puente UI↔motor: `spawn_engine`, `start_track`, hilo de progreso (250 ms), filas y metadatos |
+| `src/main.rs` | Arranque + estado compartido + presets iniciales + cableado de callbacks Slint (`navigate`, `go-back`, `tab-changed`, `open-folder`, `track-clicked`, `play-pause`) |
+| `src/config.rs` | Persistencia de `LibraryConfig` (última carpeta visitada) en `~/.config/sor/library.json` |
+| `src/playback.rs` | Puente UI↔motor: `spawn_engine`, `start_track`, hilo de progreso (250 ms), `folder_entries()` (carpeta + padre + subcarpetas + pistas), filas y metadatos |
 | `src/audio/engine/engine.rs` | `AudioEngine`: abre dispositivo `cpal` (exige `f32` y estéreo), buffer ~25 ms redondeado a potencia de dos (mín. 512), stream persistente y cadena DSP |
 | `src/audio/source.rs` | `AudioSource`: enchufe `Mutex<Option<Consumer>>` que el callback lee siempre |
 | `src/audio/loader/streamer.rs` | `spawn_streamer`: lanza `ffmpeg -f f32le -acodec pcm_f32le -ar <fs> -ac <ch> pipe:1`, hilo lector a ringbuffer `rtrb`. Al EOF espera a drenar la cola antes de señalizar el fin. `Drop` mata el proceso y une el hilo |
-| `src/audio/library.rs` | `scan_folder`: escaneo no recursivo, 11 extensiones de audio, ordenado por nombre de archivo |
+| `src/audio/library.rs` | `get_music_dir()`, `list_subdirs()`, `scan_folder`: escaneo no recursivo, 11 extensiones de audio, ordenado por nombre de archivo |
 | `src/audio/metadata.rs` | `read_metadata` con `lofty` (título/artista/duración/caratula) + `fmt_mmss` |
 | `src/audio/eq/three_band.rs` | `ThreeBandEQ`: HPF + crossover LR4 + EQ + compresores por banda |
 | `src/audio/eq/compressor.rs` | `Compressor` estéreo-link (detector = máx. \|L\|,\|R\|), envolvente attack/release exponencial |
@@ -55,7 +69,7 @@ se reconstruye virgen (la cola del tema anterior sonaba como golpe grave-medio).
 | `src/audio/controls.rs` | `Controls` (paused/song_loaded/song_ended/quit + `current_track`/`dsp_reset`/progreso) + `EqParams` + `LimiterParams` + `OutputParams`, todo atómico |
 | `src/ui/app_window.slint` | `AppWindow`: layout `Navbar + (Player | EqPanel | Library)`, propiedades y callbacks |
 | `src/ui/player.slint`, `eq_panel.slint`, `knob.slint`, `navbar.slint` | Player (título/artista/progreso/caratula), panel de EQ (knobs + sliders + toggles), knob reutilizable, nav |
-| `src/ui/library.slint`, `library_row.slint` | Biblioteca (carpeta editable + lista) y fila (carátula/título/artista/archivo) |
+| `src/ui/library.slint`, `library_row.slint` | Biblioteca navegador (barra + pestañas + lista) y fila (carátula/título/artista/archivo) |
 | `build.rs` | Compila `app_window.slint` con `slint-build` + librería de iconos `lucide` |
 
 ## Cadena DSP (valores reales del código)
@@ -96,10 +110,14 @@ limiter hacen bypass de cada etapa.
   ganancia/cuerpo/presencia; agudos: ganancia/shelf/aire) + `Drive`
   (master_gain) + slider de volumen + perillas `Clip` (−15…+2 dB) y `Techo`
   (−6…+3 dB) con sus toggles ON/OFF.
-- `Library`: campo de carpeta editable + botón de reescaneo + lista de pistas
-  (carátula, título, artista, archivo); click en fila reproduce al instante.
+- `Library`: barra superior con icono + "Biblioteca", flecha `←` (volver al
+  padre), pestaña de carpeta actual (no clickeable) y pestañas de subcarpetas
+  con scroll horizontal. Lista de pistas (carátula, título, artista, archivo);
+  click en fila reproduce al instante. La carpeta se persiste y restaura al
+  arrancar.
 - Callbacks hacia Rust: `play-pause`, `eq-changed`, `limiter-changed`,
-  `output-changed`, `open-folder`, `track-clicked` (`app_window.slint`, `main.rs`).
+  `output-changed`, `open-folder`, `navigate`, `go-back`, `tab-changed`,
+  `track-clicked` (`app_window.slint`, `main.rs`).
 
 ## Preset inicial
 
@@ -119,7 +137,8 @@ master_gain 0.72, volumen 0.75, clip -1.2 dB, techo +1.5 dB
 - `ffmpeg` en el `PATH`.
 - Audio compatible con `cpal` (ALSA en Linux), salida estéreo en `f32`.
 - Dependencias Rust (`Cargo.toml`): `cpal`, `biquad`, `rtrb`, `slint`,
-  `image` (png/jpeg), `id3`, `lofty`, `lucide-slint`.
+  `image` (png/jpeg), `id3`, `lofty`, `lucide-slint`, `dirs`, `serde`,
+  `serde_json`.
 
 ### Debian/Ubuntu
 
@@ -141,20 +160,18 @@ cd Sor
 cargo run
 ```
 
-> Nota: el `Makefile` (`make run` con `SLINT_BACKEND=winit-software`) está
-> roto — ese backend da panic. Usa `cargo run` directamente.
-
-Al arrancar se escanea la carpeta actual; escribe otra ruta en la barra de
-la Biblioteca y pulsa reescanear para cambiar de carpeta. Click en una fila
-para reproducir; el botón play reanuda o arranca la pista seleccionada
-(o la primera de la lista).
+Al arrancar se carga la última carpeta visitada (o `~/Music` si no hay). La
+barra de la Biblioteca muestra las subcarpetas como pestañas; hacer click en
+una carga sus pistas automáticamente. Click en una fila para reproducir; el
+botón play reanuda o arranca la pista seleccionada (o la primera de la lista).
 
 ## Roadmap realista (corto plazo)
 
-1. ~~Selector de archivos en la UI~~ (hecho: explorador de carpeta + play por fila).
+1. ~~Selector de archivos en la UI~~ (hecho: navegador de carpetas con pestañas + play por fila).
 2. ~~Mostrar título / artista / carátula / progreso~~ (hecho vía `lofty` + contador de frames).
-3. Presets de EQ guardables (el actual + flat + alguno más).
-4. Seek en la barra de progreso (hoy solo muestra; el hilo espera a
+3. ~~Persistencia de última carpeta~~ (hecho: `~/.config/sor/library.json`).
+4. Presets de EQ guardables (el actual + flat + alguno más).
+5. Seek en la barra de progreso (hoy solo muestra; el hilo espera a
    `song_ended` o `quit`).
-5. Pulir `Navbar` (hoy sin efecto) o quitarla si no aporta.
-6. Escaneo recursivo / biblioteca persistente (hoy solo una carpeta, no recursivo).
+6. Pulir `Navbar` (hoy sin efecto) o quitarla si no aporta.
+7. Escaneo recursivo (hoy solo una carpeta por nivel, no recursivo).

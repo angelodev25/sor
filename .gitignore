@@ -24,3 +24,11 @@ target
 #
 .agents/
 skills-lock.json
+
+# OpenCode environment artifacts
+.opencode/
+opencode.json
+
+# Local docs / debug artifacts
+debug-profiling.txt
+docker-build.txt
