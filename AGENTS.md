@@ -23,9 +23,10 @@ Rust music player: custom DSP engine (`cpal` callback) + `ffmpeg` subprocess dec
 - `src/audio/controls.rs` — all UI→audio state is atomics (`Controls`, `EqParams`, `LimiterParams`, `OutputParams`). Never add locks in the `cpal` callback; never allocate there. `current_track: AtomicU64` + `generation` counter invalidate stale readers/progress threads; `dsp_reset` rebuilds the DSP chain virgin on track change (old reverb tail sounded like a low-mid thump otherwise).
 - `src/audio/eq/three_band.rs`, `compressor.rs`, `soft_clip.rs`, `engine/limiter.rs` — DSP: HPF 20 Hz → LR4 crossover (180/3500 Hz) → per-band comp+EQ → master gain → tanh soft-clip (ceiling 0.98) → lookahead limiter → volume. Biquads rebuild only on value change (cache compare in `engine.rs`) — keep that pattern.
 - `src/ui/*.slint` — `app_window.slint` is root (`Navbar + (Player | EqPanel | Library)`), compiled by `build.rs` with `slint-build` + `lucide` icon library.
-  - `library.slint` — Biblioteca navegador: barra superior con icono + "Biblioteca", flecha `←` (volver al padre), pestaña de carpeta actual (no clickeable), pestañas de subcarpetas con scroll horizontal (wheel + drag), lista de pistas con scroll custom (Timer limitado a `scroll-fps`). Nuevas propiedades: `folder-name`, `subdirs`, `active-tab-index`, `show-back-arrow`. Nuevos callbacks: `navigate(string)`, `go-back()`, `tab-changed(int)`.
+  - `library.slint` — Biblioteca navegador: barra superior con icono + "Biblioteca", flecha `←` (volver al padre), pestaña de carpeta actual (no clickeable), pestañas de subcarpetas con scroll horizontal (wheel + drag), lista de pistas con scroll custom (Timer limitado a `scroll-fps`). Props: `scroll-y`, `scroll-target-y` (bind bidireccional desde AppWindow para preservar posición al cambiar vistas Player <-> Biblioteca), `library-reset-scroll` (activa el reset de scroll solo al cambiar de carpeta/pestaña, no al cambiar de vista). Callbacks: `navigate(string)`, `go-back()`, `tab-changed(int)`.
+  - `player.slint` — Player con botones `previous-track()` y `next-track()` además de `play-pause()`. Bucle circular en los bordes de la lista.
   - `models.slint` — `TrackEntry` + `SubdirEntry { name, path }`.
-  - `app_window.slint` — binds new library props/callbacks to `LibraryView`.
+  - `app_window.slint` — binds new library/player props/callbacks to `LibraryView` and `Player`. Props: `library-scroll-y`, `library-scroll-target-y`. Callbacks: `previous-track`, `next-track`.
 
 ## Gotchas
 

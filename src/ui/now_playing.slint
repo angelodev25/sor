@@ -75,6 +75,8 @@ export component NowPlaying inherits Rectangle {
     in-out property <image> cover;
     in-out property <bool> has-cover;
     callback play-pause();
+    callback previous-track();
+    callback next-track();
 
     // --- EQ (mismas props que EqPanel) ---
     in-out property <float> low-gain;
@@ -118,6 +120,8 @@ export component NowPlaying inherits Rectangle {
             cover <=> root.cover;
             has-cover <=> root.has-cover;
             play-pause => { root.play-pause(); }
+                previous-track => { root.previous-track(); }
+                next-track => { root.next-track(); }
         }
 
         EqPanel {
@@ -164,6 +168,8 @@ export component NowPlaying inherits Rectangle {
             cover <=> root.cover;
             has-cover <=> root.has-cover;
             play-pause => { root.play-pause(); }
+                previous-track => { root.previous-track(); }
+                next-track => { root.next-track(); }
         }
 
         if root.tab != 0: EqPanel {

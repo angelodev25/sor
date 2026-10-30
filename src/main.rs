@@ -157,6 +157,9 @@ fn main() -> Result<(), Box<dyn StdError>> {
 
     // Helper para actualizar la UI desde un FolderView
     let update_ui_from_view = |ui: &AppWindow, view: &FolderView, config: &mut LibraryConfig| {
+        // Activar reset de scroll: solo al cambiar de carpeta/pestaña,
+        // no al cambiar de vista Player <-> Biblioteca.
+        ui.set_library_reset_scroll(true);
         ui.set_folder_path(view.current_path.to_string_lossy().into_owned().into());
         ui.set_folder_name(view.current_path.file_name()
             .unwrap_or_default()
@@ -253,6 +256,42 @@ fn main() -> Result<(), Box<dyn StdError>> {
             let Some(track) = ui.get_tracks().row_data(idx as usize) else { return };
             ui.set_selected_track(idx);
             start_track(PathBuf::from(track.path.as_str()), &ui, ui_handle_track.clone(), &ctx_track);
+        });
+    }
+
+    // Anterior / siguiente con bucle (último → primero y viceversa).
+    {
+        let ui_handle_prev = ui.as_weak();
+        let ctx_prev = ctx.clone();
+        ui.on_previous_track(move || {
+            let Some(ui) = ui_handle_prev.upgrade() else { return };
+            if ui.get_is_loading() {
+                return;
+            }
+            let tracks = ui.get_tracks();
+            let len = tracks.row_count();
+            if len == 0 { return; }
+            let current = ui.get_selected_track();
+            let idx = if current < 0 { len - 1 } else { ((current as usize) + len - 1) % len } as i32;
+            let Some(track) = tracks.row_data(idx as usize) else { return };
+            ui.set_selected_track(idx as i32);
+            start_track(PathBuf::from(track.path.as_str()), &ui, ui_handle_prev.clone(), &ctx_prev);
+        });
+        let ui_handle_next = ui.as_weak();
+        let ctx_next = ctx.clone();
+        ui.on_next_track(move || {
+            let Some(ui) = ui_handle_next.upgrade() else { return };
+            if ui.get_is_loading() {
+                return;
+            }
+            let tracks = ui.get_tracks();
+            let len = tracks.row_count();
+            if len == 0 { return; }
+            let current = ui.get_selected_track();
+            let idx = if current < 0 { 0 } else { ((current as usize) + 1) % len } as i32;
+            let Some(track) = tracks.row_data(idx as usize) else { return };
+            ui.set_selected_track(idx as i32);
+            start_track(PathBuf::from(track.path.as_str()), &ui, ui_handle_next.clone(), &ctx_next);
         });
     }
 

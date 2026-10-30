@@ -40,6 +40,12 @@ export component AppWindow inherits Window {
     in-out property <[SubdirEntry]> subdirs;
     in-out property <int> active-tab-index: 0;
     in-out property <bool> show-back-arrow: false;
+    // Posición de scroll de la Biblioteca, preservada al cambiar vistas.
+    in-out property <length> library-scroll-y: 0px;
+    in-out property <length> library-scroll-target-y: 0px;
+    // Activa el reset de scroll al cambiar tracks (solo al cambiar de carpeta,
+    // no al cambiar de vista Player <-> Biblioteca).
+    in-out property <bool> library-reset-scroll: true;
 
     // ---- Parametros del EQ, expuestos para que Rust los pueda tocar ----
     in-out property <float> eq-low-gain: 0;
@@ -73,6 +79,8 @@ export component AppWindow inherits Window {
     callback navigate(string);
     callback go-back();
     callback tab-changed(int);
+    callback previous-track();
+    callback next-track();
 
     // Umbrales centralizados en theme.slint (un solo sitio a editar).
     property <bool> is-wide: root.width >= LayoutBreakpoints.wide;
@@ -96,6 +104,9 @@ export component AppWindow inherits Window {
             subdirs <=> root.subdirs;
             active-tab-index <=> root.active-tab-index;
             show-back-arrow <=> root.show-back-arrow;
+            scroll-y <=> root.library-scroll-y;
+            scroll-target-y <=> root.library-scroll-target-y;
+            library-reset-scroll <=> root.library-reset-scroll;
             open-folder => { root.open-folder(); }
             track-clicked(idx) => { root.track-clicked(idx); }
             navigate(path) => { root.navigate(path); }
@@ -117,6 +128,8 @@ export component AppWindow inherits Window {
                 cover <=> root.cover;
                 has-cover <=> root.has-cover;
                 play-pause => { root.play-pause(); }
+                previous-track => { root.previous-track(); }
+                next-track => { root.next-track(); }
             }
 
             // El EqPanel tiene ancho fijo y ocupa todo el alto disponible
@@ -174,6 +187,9 @@ export component AppWindow inherits Window {
             subdirs <=> root.subdirs;
             active-tab-index <=> root.active-tab-index;
             show-back-arrow <=> root.show-back-arrow;
+            scroll-y <=> root.library-scroll-y;
+            scroll-target-y <=> root.library-scroll-target-y;
+            library-reset-scroll <=> root.library-reset-scroll;
             open-folder => { root.open-folder(); }
             track-clicked(idx) => { root.track-clicked(idx); }
             navigate(path) => { root.navigate(path); }
@@ -204,6 +220,8 @@ export component AppWindow inherits Window {
             cover <=> root.cover;
             has-cover <=> root.has-cover;
             play-pause => { root.play-pause(); }
+            previous-track => { root.previous-track(); }
+            next-track => { root.next-track(); }
 
             low-gain       <=> root.eq-low-gain;
             low-shelf      <=> root.eq-low-shelf;

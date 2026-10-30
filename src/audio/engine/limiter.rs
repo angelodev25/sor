@@ -67,6 +67,9 @@ impl Limiter {
     pub fn set_ceiling_db(&mut self, ceiling_db: f32) {
         self.ceiling = 10f32.powf(ceiling_db / 20.0);
     }
+    // Reserved for future use: make-up gain del limitador (está en el UI como
+    // perilla pero aún no conectada). Se permite dead_code hasta conectarla.
+    #[allow(dead_code)]
     pub fn set_makeup(&mut self, makeup: f32) {
         self.makeup = makeup;
     }

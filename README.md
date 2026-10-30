@@ -4,7 +4,7 @@ Reproductor de música en Rust. Nace de la calidad de salida de Mixxx con buena
 ecualización: el objetivo es esa pegada y claridad, pero en una app sencilla
 para escuchar música, sin la complejidad de una cabina DJ.
 
-## Estado actual (v0.4: biblioteca navegador + persistencia)
+## Estado actual (v0.2.0: biblioteca navegador + persistencia)
 
 - Motor DSP propio: HPF + crossover LR4 de 3 bandas + EQ + compresores por
   banda + soft clipper tanh + limitador lookahead + volumen. Todo en el
@@ -68,8 +68,8 @@ se reconstruye virgen (la cola del tema anterior sonaba como golpe grave-medio).
 | `src/audio/engine/limiter.rs` | `Limiter` brickwall con lookahead (línea de retardo + envolvente asimétrica, ganancia común a L/R) |
 | `src/audio/controls.rs` | `Controls` (paused/song_loaded/song_ended/quit + `current_track`/`dsp_reset`/progreso) + `EqParams` + `LimiterParams` + `OutputParams`, todo atómico |
 | `src/ui/app_window.slint` | `AppWindow`: layout `Navbar + (Player | EqPanel | Library)`, propiedades y callbacks |
-| `src/ui/player.slint`, `eq_panel.slint`, `knob.slint`, `navbar.slint` | Player (título/artista/progreso/caratula), panel de EQ (knobs + sliders + toggles), knob reutilizable, nav |
-| `src/ui/library.slint`, `library_row.slint` | Biblioteca navegador (barra + pestañas + lista) y fila (carátula/título/artista/archivo) |
+| `src/ui/player.slint`, `eq_panel.slint`, `knob.slint`, `navbar.slint` | Player (título/artista/progreso/caratula) con botones Anterior/Siguiente (`previous-track`, `next-track`) además de `play-pause`; panel de EQ, knob, nav. |
+| `src/ui/library.slint`, `library_row.slint` | Biblioteca navegador (barra + pestañas + lista) y fila (carátula/título/artista/archivo). Props: `scroll-y`, `scroll-target-y` (bind desde AppWindow para preservar posición al cambiar vistas). Callbacks: `navigate`, `go-back`, `tab-changed`. |
 | `build.rs` | Compila `app_window.slint` con `slint-build` + librería de iconos `lucide` |
 
 ## Cadena DSP (valores reales del código)
@@ -114,10 +114,15 @@ limiter hacen bypass de cada etapa.
   padre), pestaña de carpeta actual (no clickeable) y pestañas de subcarpetas
   con scroll horizontal. Lista de pistas (carátula, título, artista, archivo);
   click en fila reproduce al instante. La carpeta se persiste y restaura al
-  arrancar.
+  arrancar. **La posición de scroll se preserva al cambiar entre vistas**
+  Player <-> Biblioteca, y se resetea al cambiar de carpeta o pestaña.
+- `Player`: además de play/pause, tiene botones **Anterior** (`SkipBackIcon`)
+  y **Siguiente** (`SkipForwardIcon`) con bucle circular (último → primero y
+  primero → último).
 - Callbacks hacia Rust: `play-pause`, `eq-changed`, `limiter-changed`,
   `output-changed`, `open-folder`, `navigate`, `go-back`, `tab-changed`,
-  `track-clicked` (`app_window.slint`, `main.rs`).
+  `track-clicked`, `previous-track`, `next-track` (`app_window.slint`,
+  `main.rs`).
 
 ## Preset inicial
 

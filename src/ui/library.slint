@@ -42,9 +42,21 @@ export component LibraryView inherits Rectangle {
 
     background: transparent;
 
+    // Propiedad para controlar si se resetea el scroll al cambiar tracks.
+    // Se activa desde Rust (update_ui_from_view) al cambiar de carpeta/pestaña,
+    // y se desactiva automáticamente tras el reset. Así al cambiar de vista
+    // Player <-> Biblioteca se preserva la posición, pero al cambiar de carpeta
+    // se vuelve al inicio.
+    in-out property <bool> library-reset-scroll: true;
+
     changed tracks => {
-        root.scroll-y = 0;
-        root.scroll-target-y = 0;
+        if root.library-reset-scroll {
+            root.scroll-y = 0;
+            root.scroll-target-y = 0;
+            root.tabs-scroll-x = 0px;
+            root.tabs-scroll-target-x = 0px;
+            root.library-reset-scroll = false;
+        }
     }
 
     VerticalLayout {
@@ -263,6 +275,7 @@ export component LibraryView inherits Rectangle {
                                     font-weight: root.active-tab-index == (idx + 1) ? 600 : 400;
                                     vertical-alignment: center;
                                     wrap: no-wrap;
+                                    overflow: elide;
                                 }
                             }
 

@@ -42,6 +42,8 @@ export component Player inherits Rectangle {
     in property <bool> compact: false;
 
     callback play-pause();
+    callback previous-track();
+    callback next-track();
 
     background: #10151b;
 
@@ -160,7 +162,7 @@ export component Player inherits Rectangle {
                     IconButton {
                         width: 44px;
                         height: 44px;
-                        clicked => { }
+                        clicked => { root.previous-track(); }
 
                         SkipBackIcon {
                             size: 18px;
@@ -224,7 +226,7 @@ export component Player inherits Rectangle {
                     IconButton {
                         width: 44px;
                         height: 44px;
-                        clicked => { }
+                        clicked => { root.next-track(); }
 
                         SkipForwardIcon {
                             size: 18px;

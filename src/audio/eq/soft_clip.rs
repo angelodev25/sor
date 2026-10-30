@@ -65,6 +65,9 @@ impl SoftClipper {
     }
 
     /// Cambia el ceiling. `ceiling` en amplitud lineal (0.5..1.0).
+    /// Reserved for future use: conectar al soft-clip del UI (está como perilla
+    /// pero aún no cableada). Se permite dead_code hasta conectarla.
+    #[allow(dead_code)]
     pub fn set_ceiling(&mut self, ceiling: f32) {
         self.ceiling = ceiling.clamp(0.5, 1.0);
         self.threshold = self.threshold.clamp(0.001, self.ceiling - 0.001);
