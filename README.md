@@ -4,7 +4,7 @@ Reproductor de música en Rust. Nace de la calidad de salida de Mixxx con buena
 ecualización: el objetivo es esa pegada y claridad, pero en una app sencilla
 para escuchar música, sin la complejidad de una cabina DJ.
 
-## Estado actual (v0.2.0: biblioteca navegador + persistencia)
+## Estado actual (v0.4.0: biblioteca navegador + persistencia)
 
 - Motor DSP propio: HPF + crossover LR4 de 3 bandas + EQ + compresores por
   banda + soft clipper tanh + limitador lookahead + volumen. Todo en el
